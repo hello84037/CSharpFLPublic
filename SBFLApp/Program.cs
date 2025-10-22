@@ -17,27 +17,35 @@ namespace SBFLApp
 
             Console.WriteLine("Running the Spetrum Based Fault Localizer Application\n");
 
+            if (args.Length < 2)
+            {
+                Console.WriteLine("Usage: dotnet run <solutionDirectory> <testProjectName>");
+                return;
+            }
 
-            // Spectrum.SpectrumMethod("D:/CS4850/MathApp-Main/MathApp/MathOperations.cs", "Add");
-            // Spectrum.SpectrumMethod("D:/CS4850/MathApp-Main/MathApp/MathOperations.cs", "Subtract");
+            string solutionDirectory = args[0];
+            string testProjectName = args[1];
 
-            // MathOperations.SpectrumAll("D:/CS4850/MathApp-Main/MathApp.Tests/Addition.cs");
+            if (!Directory.Exists(solutionDirectory))
+            {
+                Console.WriteLine($"Solution directory not found: {solutionDirectory}");
+                return;
+            }
 
-            // MathApp.Spectrum.SpectrumAllForTest("D:/CS4850/MathApp-Main/MathApp/MathOperations.cs", "AdditionTests.coverage");
+            string testProjectDirectory = Path.Combine(solutionDirectory, testProjectName);
+            if (!Directory.Exists(testProjectDirectory))
+            {
+                Console.WriteLine($"Test project directory not found: {testProjectDirectory}");
+                return;
+            }
 
-            // Spectrum.SpectrumProject("D:/CS4850/MathApp-Main/", "MathAppTests.AllFiles");
+            string? testProjectFile = Directory.EnumerateFiles(testProjectDirectory, "*.csproj", SearchOption.TopDirectoryOnly).FirstOrDefault();
+            string testProjectPath = testProjectFile ?? testProjectDirectory;
 
-            // bool passed = RunTest("D:/CS4850/MathApp-Main/MathApp.Tests", "AdditionTests", "AdditionTest");
-
-            // Console.WriteLine($"Test passed: {passed}");
-
-            // Spectrum.SpectrumTests("D:/CS4850/MathApp-Main/");
-
-            var testFiles = new List<string>
-                {
-                    "C:/repos/CSharpFL/MathApp.Tests/Addition.cs",
-                    "C:/repos/CSharpFL/MathApp.Tests/Subtraction.cs"
-                };
+            var allTestFiles = Directory.EnumerateFiles(testProjectDirectory, "*.cs", SearchOption.AllDirectories)
+                .Where(file => !file.Contains(Path.DirectorySeparatorChar + "bin" + Path.DirectorySeparatorChar)
+                            && !file.Contains(Path.DirectorySeparatorChar + "obj" + Path.DirectorySeparatorChar))
+                .ToList();
 
             var targets = new List<(string className, string methodName)>
                     {
@@ -47,9 +55,25 @@ namespace SBFLApp
                         ("SubtractionTests", "SubtractionTest2"),
                     };
 
+            var testFiles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var file in allTestFiles)
+            {
+                string fileContents = File.ReadAllText(file);
+                if (targets.Any(target => fileContents.Contains($"class {target.className}")))
+                {
+                    testFiles.Add(file);
+                }
+            }
+
+            if (!testFiles.Any())
+            {
+                Console.WriteLine($"No test files found in {testProjectDirectory} matching the provided targets.");
+                return;
+            }
+
             foreach (var file in testFiles)
             {
-                SetInjection(file, targets);
+                SetInjection(file, targets, testProjectPath);
             }
 
             Dictionary<string, ISet<string>> testCoverage = new Dictionary<string, ISet<string>>();
@@ -96,7 +120,7 @@ namespace SBFLApp
             rank.calculateOchiai();
         }
 
-        private static void SetInjection(string filePath, List<(string className, string methodName)> targets)
+        private static void SetInjection(string filePath, List<(string className, string methodName)> targets, string testProjectPath)
         {
             Console.WriteLine("Injection and testing in progress...");
 
@@ -160,7 +184,7 @@ namespace SBFLApp
                 File.AppendAllText(coveragePath, newGuid + Environment.NewLine);
 
                 // Run the test silently
-                RunTest(Path.GetDirectoryName(filePath), className, methodName);
+                RunTest(testProjectPath, className, methodName);
             }
 
             if (modified)
@@ -170,7 +194,7 @@ namespace SBFLApp
             }
         }
 
-        private static bool RunTest(string solutionPath, string testName, string testMethodToRun)
+        private static bool RunTest(string testProjectPath, string testName, string testMethodToRun)
         {
             try
             {
@@ -178,7 +202,7 @@ namespace SBFLApp
 
                 ProcessStartInfo startInfo = new ProcessStartInfo(
                     "dotnet",
-                    $"test \"{solutionPath}\" --no-build --filter \"{filter}\""
+                    $"test \"{testProjectPath}\" --no-build --filter \"{filter}\""
                 );
                 //{
                 //    RedirectStandardOutput = true,
