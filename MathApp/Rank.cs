@@ -106,17 +106,17 @@ public class Rank
         {
             (int failedOfStmt, int passedOfStmt) = GetCoverageCounts(stmt);
 
-            float failedPart = (float)failedOfStmt / totalFailed;
-            float passedPart = (float)passedOfStmt / totalPassed;
+            float denominator = (float)Math.Sqrt(totalFailed * (failedOfStmt + passedOfStmt));
+            float rank = 0f;
 
-            float rank = failedPart / (failedPart + passedPart);
+            if (denominator > 0)
+            {
+                rank = failedOfStmt / denominator;
+            }
 
-            tarantulaRank.Add(stmt, rank);
-            Console.WriteLine($"[Tarantula] Statement: {stmt}, Rank: {rank:F3}");
-
+            ochiaiRank.Add(stmt, rank);
+            Console.WriteLine($"[Ochiai] Statement: {stmt}, Rank: {rank:F3}");
         }
-
-
     }
 
     public void calculateOchiai()
@@ -196,42 +196,4 @@ public class Rank
     }
 
 
-            try
-            {
-                foreach (string test in failed)
-                {
-                    ISet<string> statementCoveredByTest = testCoverage[test];
-                    if (statementCoveredByTest.Contains(stmt))
-                    {
-                        failedOfStmt++;
-                    }
-                }
-
-                foreach (string test in passed)
-                {
-                    ISet<string> statementCoveredByTest = testCoverage[test];
-                    if (statementCoveredByTest.Contains(stmt))
-                    {
-                        passedOfStmt++;
-                    }
-                }
-
-            }
-            catch (NullReferenceException nex)
-            {
-                Console.WriteLine(nex.StackTrace);
-            }
-
-            float denominator = (float)Math.Sqrt(totalFailed * (failedOfStmt + passedOfStmt));
-            float rank = 0f;
-
-            if (denominator > 0)
-            {
-                rank = failedOfStmt / denominator;
-            }
-
-            ochiaiRank.Add(stmt, rank);
-            Console.WriteLine($"[Ochiai] Statement: {stmt}, Rank: {rank:F3}");
-        }
-    }
 }
