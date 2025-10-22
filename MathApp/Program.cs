@@ -36,8 +36,8 @@ namespace MathApp
 
             var testFiles = new List<string>
                 {
-                    "D:/CS4850/MathApp-Main/MathApp.Tests/Addition.cs",
-                    "D:/CS4850/MathApp-Main/MathApp.Tests/Subtraction.cs"
+                    "C:/repos/CSharpFL/MathApp.Tests/Addition.cs",
+                    "C:/repos/CSharpFL/MathApp.Tests/Subtraction.cs"
                 };
 
             var targets = new List<(string className, string methodName)>
@@ -180,14 +180,14 @@ namespace MathApp
 
                 ProcessStartInfo startInfo = new ProcessStartInfo(
                     "dotnet",
-                    $"test \"{solutionPath}\" --filter \"{filter}\""
-                )
-                {
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    UseShellExecute = false,
-                    CreateNoWindow = true,
-                };
+                    $"test \"{solutionPath}\" --no-build --filter \"{filter}\""
+                );
+                //{
+                //    RedirectStandardOutput = true,
+                //    RedirectStandardError = true,
+                //    UseShellExecute = false,
+                //    CreateNoWindow = true,
+                //};
 
                 using (Process process = Process.Start(startInfo))
                 {
