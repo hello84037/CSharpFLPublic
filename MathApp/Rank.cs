@@ -1,4 +1,6 @@
-﻿using System.Collections;
+using System;
+using System.Collections;
+using System.Collections.Generic;
 
 public class Rank
 {
@@ -12,6 +14,7 @@ public class Rank
     ISet<string> failed;
     ISet<string> passed;
     public Dictionary<string, float> tarantulaRank;
+    public Dictionary<string, float> ochiaiRank;
     List<string> finalRanking;
 
     public Rank(Dictionary<string, ISet<string>> testCoverage, Dictionary<string, bool> tastPassFail)
@@ -22,6 +25,7 @@ public class Rank
         failed = new HashSet<string>();
         passed = new HashSet<string>();
         tarantulaRank = new Dictionary<string, float>();
+        ochiaiRank = new Dictionary<string, float>();
         finalRanking = new List<string>();
 
         hashCoverage = new Hashtable(testCoverage);
@@ -29,7 +33,7 @@ public class Rank
 
         foreach (var key1 in hashCoverage.Keys)
         {
-            if (hashCoverage[key1] is ISet<string> statementSet) // Ensure type safety  
+            if (hashCoverage[key1] is ISet<string> statementSet) // Ensure type safety
             {
                 allStatements.UnionWith(statementSet);
             }
@@ -39,7 +43,7 @@ public class Rank
 
         foreach (var key2 in hashPassFail.Keys)
         {
-            if (key2 is string testName && hashPassFail[key2] is bool passFail) // Ensure type safety  
+            if (key2 is string testName && hashPassFail[key2] is bool passFail) // Ensure type safety
             {
                 if (passFail)
                 {
@@ -100,6 +104,54 @@ public class Rank
 
         }
 
+
+    }
+
+    public void calculateOchiai()
+    {
+        foreach (string stmt in allStatements)
+        {
+            int failedOfStmt = 0;
+            int passedOfStmt = 0;
+
+            try
+            {
+                foreach (string test in failed)
+                {
+                    ISet<string> statementCoveredByTest = testCoverage[test];
+                    if (statementCoveredByTest.Contains(stmt))
+                    {
+                        failedOfStmt++;
+                    }
+                }
+
+                foreach (string test in passed)
+                {
+                    ISet<string> statementCoveredByTest = testCoverage[test];
+                    if (statementCoveredByTest.Contains(stmt))
+                    {
+                        passedOfStmt++;
+                    }
+                }
+
+            }
+            catch (NullReferenceException nex)
+            {
+                Console.WriteLine(nex.StackTrace);
+            }
+
+            float denominator = (float)Math.Sqrt(totalFailed * (failedOfStmt + passedOfStmt));
+            float rank = 0f;
+
+            if (denominator > 0)
+            {
+                rank = failedOfStmt / denominator;
+            }
+
+            ochiaiRank.Add(stmt, rank);
+            Console.WriteLine($"[Ochiai] Statement: {stmt}, Rank: {rank:F3}");
+
+        }
 
     }
 
