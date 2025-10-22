@@ -15,6 +15,9 @@ public class Rank
     ISet<string> passed;
     public Dictionary<string, float> tarantulaRank;
     public Dictionary<string, float> ochiaiRank;
+    public Dictionary<string, float> dStarRank;
+    public Dictionary<string, float> op2Rank;
+    public Dictionary<string, float> jaccardRank;
     List<string> finalRanking;
 
     public Rank(Dictionary<string, ISet<string>> testCoverage, Dictionary<string, bool> tastPassFail)
@@ -26,6 +29,9 @@ public class Rank
         passed = new HashSet<string>();
         tarantulaRank = new Dictionary<string, float>();
         ochiaiRank = new Dictionary<string, float>();
+        dStarRank = new Dictionary<string, float>();
+        op2Rank = new Dictionary<string, float>();
+        jaccardRank = new Dictionary<string, float>();
         finalRanking = new List<string>();
 
         hashCoverage = new Hashtable(testCoverage);
@@ -61,38 +67,44 @@ public class Rank
         totalPassed = passed.Count;
     }
 
+    private (int failedCovered, int passedCovered) GetCoverageCounts(string stmt)
+    {
+        int failedOfStmt = 0;
+        int passedOfStmt = 0;
+
+        try
+        {
+            foreach (string test in failed)
+            {
+                ISet<string> statementCoveredByTest = testCoverage[test];
+                if (statementCoveredByTest.Contains(stmt))
+                {
+                    failedOfStmt++;
+                }
+            }
+
+            foreach (string test in passed)
+            {
+                ISet<string> statementCoveredByTest = testCoverage[test];
+                if (statementCoveredByTest.Contains(stmt))
+                {
+                    passedOfStmt++;
+                }
+            }
+        }
+        catch (NullReferenceException nex)
+        {
+            Console.WriteLine(nex.StackTrace);
+        }
+
+        return (failedOfStmt, passedOfStmt);
+    }
+
     public void calculateTarantula()
     {
         foreach (string stmt in allStatements)
         {
-            int failedOfStmt = 0;
-            int passedOfStmt = 0;
-
-            try
-            {
-                foreach (string test in failed)
-                {
-                    ISet<string> statementCoveredByTest = testCoverage[test];
-                    if (statementCoveredByTest.Contains(stmt))
-                    {
-                        failedOfStmt++;
-                    }
-                }
-
-                foreach (string test in passed)
-                {
-                    ISet<string> statementCoveredByTest = testCoverage[test];
-                    if (statementCoveredByTest.Contains(stmt))
-                    {
-                        passedOfStmt++;
-                    }
-                }
-
-            }
-            catch (NullReferenceException nex)
-            {
-                Console.WriteLine(nex.StackTrace);
-            }
+            (int failedOfStmt, int passedOfStmt) = GetCoverageCounts(stmt);
 
             float failedPart = (float)failedOfStmt / totalFailed;
             float passedPart = (float)passedOfStmt / totalPassed;
@@ -111,8 +123,78 @@ public class Rank
     {
         foreach (string stmt in allStatements)
         {
-            int failedOfStmt = 0;
-            int passedOfStmt = 0;
+            (int failedOfStmt, int passedOfStmt) = GetCoverageCounts(stmt);
+
+            float denominator = (float)Math.Sqrt(totalFailed * (failedOfStmt + passedOfStmt));
+            float rank = 0f;
+
+            if (denominator > 0)
+            {
+                rank = failedOfStmt / denominator;
+            }
+
+            ochiaiRank.Add(stmt, rank);
+            Console.WriteLine($"[Ochiai] Statement: {stmt}, Rank: {rank:F3}");
+
+        }
+
+    }
+
+    public void calculateDStar()
+    {
+        foreach (string stmt in allStatements)
+        {
+            (int failedOfStmt, int passedOfStmt) = GetCoverageCounts(stmt);
+
+            int denominatorBase = passedOfStmt + (totalFailed - failedOfStmt);
+            float rank = 0f;
+
+            if (denominatorBase > 0)
+            {
+                rank = (float)(failedOfStmt * failedOfStmt) / denominatorBase;
+            }
+            else if (failedOfStmt > 0)
+            {
+                rank = float.PositiveInfinity;
+            }
+
+            dStarRank.Add(stmt, rank);
+            Console.WriteLine($"[D*] Statement: {stmt}, Rank: {rank:F3}");
+        }
+    }
+
+    public void calculateOp2()
+    {
+        foreach (string stmt in allStatements)
+        {
+            (int failedOfStmt, int passedOfStmt) = GetCoverageCounts(stmt);
+
+            float rank = failedOfStmt - (float)passedOfStmt / (totalPassed + 1);
+
+            op2Rank.Add(stmt, rank);
+            Console.WriteLine($"[Op2] Statement: {stmt}, Rank: {rank:F3}");
+        }
+    }
+
+    public void calculateJaccard()
+    {
+        foreach (string stmt in allStatements)
+        {
+            (int failedOfStmt, int passedOfStmt) = GetCoverageCounts(stmt);
+
+            int denominatorBase = totalFailed + passedOfStmt;
+            float rank = 0f;
+
+            if (denominatorBase > 0)
+            {
+                rank = (float)failedOfStmt / denominatorBase;
+            }
+
+            jaccardRank.Add(stmt, rank);
+            Console.WriteLine($"[Jaccard] Statement: {stmt}, Rank: {rank:F3}");
+        }
+    }
+
 
             try
             {
