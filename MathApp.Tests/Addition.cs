@@ -6,18 +6,18 @@ public class AdditionTests
     [Fact]
     public void AdditionTest()
     {
-        System.IO.File.AppendAllText("AdditionTests.AdditionTest.coverage", "17291029-976c-47a8-a351-7c3ecc1f4a6f");
+        System.IO.File.AppendAllText("AdditionTests.AdditionTest.coverage", "eb160241-f975-4935-9d76-cfbbf9f2180a");
         int result = MathApp.MathOperations.Add(5, 3);
-        System.IO.File.AppendAllText("AdditionTests.AdditionTest.coverage", "17291029-976c-47a8-a351-7c3ecc1f4a6f");
+        System.IO.File.AppendAllText("AdditionTests.AdditionTest.coverage", "eb160241-f975-4935-9d76-cfbbf9f2180a");
         Assert.Equal(8, result);
     }
 
     [Fact]
     public void AdditionTest2()
     {
-        System.IO.File.AppendAllText("AdditionTests.AdditionTest2.coverage", "176977e7-764d-490b-97ca-5726038889a3");
+        System.IO.File.AppendAllText("AdditionTests.AdditionTest2.coverage", "db8749c9-69fa-44b4-95ae-f0149087aea9");
         int result = MathApp.MathOperations.Add(4, 3);
-        System.IO.File.AppendAllText("AdditionTests.AdditionTest2.coverage", "176977e7-764d-490b-97ca-5726038889a3");
+        System.IO.File.AppendAllText("AdditionTests.AdditionTest2.coverage", "db8749c9-69fa-44b4-95ae-f0149087aea9");
         Assert.Equal(7, result);
     }
 

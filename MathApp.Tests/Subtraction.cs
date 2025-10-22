@@ -6,19 +6,19 @@ public class SubtractionTests
     [Fact]
     public void SubtractionTest()
     {
-        System.IO.File.AppendAllText("SubtractionTests.SubtractionTest.coverage", "dbe335d2-bae8-4660-92ec-189f445f9a5b");
+        System.IO.File.AppendAllText("SubtractionTests.SubtractionTest.coverage", "635a5245-e6d3-4dfd-aa88-7b0ae49aa237");
         int result = MathApp.MathOperations.Subtract(5, 3);
-        System.IO.File.AppendAllText("SubtractionTests.SubtractionTest.coverage", "dbe335d2-bae8-4660-92ec-189f445f9a5b");
+        System.IO.File.AppendAllText("SubtractionTests.SubtractionTest.coverage", "635a5245-e6d3-4dfd-aa88-7b0ae49aa237");
         Assert.Equal(2, result);
     }
 
     [Fact]
     public void SubtractionTest2()
     {
-        System.IO.File.AppendAllText("SubtractionTests.SubtractionTest2.coverage", "74bc2c10-6480-4d90-aaba-4095d4bd1d99");
+        System.IO.File.AppendAllText("SubtractionTests.SubtractionTest2.coverage", "90eacdf1-863f-4d26-aa2a-ac061f25f291");
         //int result = MathApp.MathOperations.Subtract(6, 4);
         int result = MathApp.MathOperations.Subtract(4, 6);
-        System.IO.File.AppendAllText("SubtractionTests.SubtractionTest2.coverage", "74bc2c10-6480-4d90-aaba-4095d4bd1d99");
+        System.IO.File.AppendAllText("SubtractionTests.SubtractionTest2.coverage", "90eacdf1-863f-4d26-aa2a-ac061f25f291");
         Assert.Equal(2, result);
     }
 

@@ -94,8 +94,7 @@ namespace MathApp
 
             Rank rank = new Rank(testCoverage, testPassFail);
             rank.calculateTarantula();
-
-
+            rank.calculateOchiai();
         }
 
         private static void SetInjection(string filePath, List<(string className, string methodName)> targets)
