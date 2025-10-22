@@ -7,13 +7,12 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MathApp", "MathApp\MathApp.
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MathApp.Tests", "MathApp.Tests\MathApp.Tests.csproj", "{8272B975-3596-4230-A006-344F8AAFE80E}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SBFLApp", "SBFLApp\SBFLApp.csproj", "{4D88286E-F8D7-4FFD-9C1D-603808C7D15C}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
 		Release|Any CPU = Release|Any CPU
-	EndGlobalSection
-	GlobalSection(SolutionProperties) = preSolution
-		HideSolutionNode = FALSE
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
 		{AF80E587-1980-46F6-8538-E73B2C8BC154}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
@@ -24,5 +23,15 @@ Global
 		{8272B975-3596-4230-A006-344F8AAFE80E}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{8272B975-3596-4230-A006-344F8AAFE80E}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{8272B975-3596-4230-A006-344F8AAFE80E}.Release|Any CPU.Build.0 = Release|Any CPU
+		{4D88286E-F8D7-4FFD-9C1D-603808C7D15C}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{4D88286E-F8D7-4FFD-9C1D-603808C7D15C}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{4D88286E-F8D7-4FFD-9C1D-603808C7D15C}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{4D88286E-F8D7-4FFD-9C1D-603808C7D15C}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {0E4DBB85-0601-4A10-9C07-B8DAE5FC440B}
 	EndGlobalSection
 EndGlobal
