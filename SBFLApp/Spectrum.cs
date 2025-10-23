@@ -1,9 +1,11 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
+using SBFLApp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis;
@@ -26,7 +28,7 @@ namespace MathApp
                 Console.WriteLine($"Method '{methodName}' not found.");
                 return;
             }
-            var rewriter = new CoverageInjector(methodName);
+            var rewriter = new CoverageInjector(methodName, null, null, filePath);
             var newMethod = (MethodDeclarationSyntax)rewriter.Visit(method);
             var newRoot = root.ReplaceNode(method, newMethod);
             File.WriteAllText(filePath, newRoot.NormalizeWhitespace().ToFullString());
@@ -39,7 +41,7 @@ namespace MathApp
             var sourceCode = File.ReadAllText(filePath);
             var tree = CSharpSyntaxTree.ParseText(sourceCode);
             var root = tree.GetRoot();
-            var rewriter = new CoverageInjector();
+            var rewriter = new CoverageInjector(sourceFilePath: filePath);
             var newRoot = rewriter.Visit(root);
             File.WriteAllText(filePath, newRoot.NormalizeWhitespace().ToFullString());
             Console.WriteLine($"Injected logging into all methods in '{filePath}'.");
@@ -58,7 +60,7 @@ namespace MathApp
             Directory.CreateDirectory(coverageFolder);
             var coverageFilePath = Path.Combine(coverageFolder, $"{testName}.coverage");
 
-            var rewriter = new CoverageInjector(null, testName, guidCollector);
+            var rewriter = new CoverageInjector(null, testName, guidCollector, filePath);
             var newRoot = rewriter.Visit(root);
 
             File.WriteAllText(filePath, newRoot.NormalizeWhitespace().ToFullString());
@@ -95,7 +97,7 @@ namespace MathApp
                 var tree = CSharpSyntaxTree.ParseText(sourceCode);
                 var root = tree.GetRoot();
 
-                var rewriter = new CoverageInjector();
+                var rewriter = new CoverageInjector(sourceFilePath: file);
                 var newRoot = rewriter.Visit(root);
 
                 var fileName = Path.GetFileName(file);
@@ -237,13 +239,49 @@ namespace MathApp
             private readonly string? _targetMethodName;
             private readonly string? _testName;
             private readonly List<string>? _guidCollector;
+            private readonly string? _sourceFilePath;
+            private readonly Stack<string> _namespaceStack = new();
+            private readonly Stack<string> _typeStack = new();
             private string _currentMethodName = "";
 
-            public CoverageInjector(string? methodName = null, string? testName = null, List<string>? guidCollector = null)
+            public CoverageInjector(string? methodName = null, string? testName = null, List<string>? guidCollector = null, string? sourceFilePath = null)
             {
                 _targetMethodName = methodName;
                 _testName = testName;
                 _guidCollector = guidCollector;
+                _sourceFilePath = sourceFilePath;
+            }
+
+            public override SyntaxNode VisitNamespaceDeclaration(NamespaceDeclarationSyntax node)
+            {
+                _namespaceStack.Push(node.Name.ToString());
+                var result = base.VisitNamespaceDeclaration(node);
+                _namespaceStack.Pop();
+                return result ?? node;
+            }
+
+            public override SyntaxNode VisitFileScopedNamespaceDeclaration(FileScopedNamespaceDeclarationSyntax node)
+            {
+                _namespaceStack.Push(node.Name.ToString());
+                var result = base.VisitFileScopedNamespaceDeclaration(node);
+                _namespaceStack.Pop();
+                return result ?? node;
+            }
+
+            public override SyntaxNode VisitClassDeclaration(ClassDeclarationSyntax node)
+            {
+                _typeStack.Push(node.Identifier.Text);
+                var result = base.VisitClassDeclaration(node);
+                _typeStack.Pop();
+                return result ?? node;
+            }
+
+            public override SyntaxNode VisitStructDeclaration(StructDeclarationSyntax node)
+            {
+                _typeStack.Push(node.Identifier.Text);
+                var result = base.VisitStructDeclaration(node);
+                _typeStack.Pop();
+                return result ?? node;
             }
 
             // Visit method declarations, process only the target method if specified
@@ -253,7 +291,7 @@ namespace MathApp
                     return node;
 
                 _currentMethodName = node.Identifier.Text;
-                return base.VisitMethodDeclaration(node);
+                return base.VisitMethodDeclaration(node) ?? node;
             }
 
             // Visit blocks and inject logging statements before each original statement
@@ -279,12 +317,38 @@ namespace MathApp
                     );
 
                     _guidCollector?.Add(guid);
+                    var qualifiedName = GetQualifiedMethodName();
+                    if (!string.IsNullOrEmpty(qualifiedName))
+                    {
+                        var sourceFileName = string.IsNullOrWhiteSpace(_sourceFilePath)
+                            ? null
+                            : Path.GetFileName(_sourceFilePath);
+                        GuidMappingStore.AddMapping(guid, qualifiedName, sourceFileName);
+                    }
                     var visitedStatement = (StatementSyntax)Visit(statement);
                     newStatements.Add(logStatement);
                     newStatements.Add(visitedStatement);
                 }
 
                 return node.WithStatements(SyntaxFactory.List(newStatements));
+            }
+
+            private string GetQualifiedMethodName()
+            {
+                if (string.IsNullOrEmpty(_currentMethodName))
+                {
+                    return string.Empty;
+                }
+
+                var namespacePrefix = _namespaceStack.Count > 0
+                    ? string.Join('.', _namespaceStack.Reverse()) + "."
+                    : string.Empty;
+
+                var typePrefix = _typeStack.Count > 0
+                    ? string.Join('.', _typeStack.Reverse()) + "."
+                    : string.Empty;
+
+                return $"{namespacePrefix}{typePrefix}{_currentMethodName}";
             }
 
 
