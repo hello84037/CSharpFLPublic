@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "SBFLApp": {
+      "commandName": "Project",
+      "commandLineArgs": "\"C:\\Repos\\CSharpFL\" MathApp.Tests"
+    }
+  }
+}

@@ -106,16 +106,13 @@ public class Rank
         {
             (int failedOfStmt, int passedOfStmt) = GetCoverageCounts(stmt);
 
-            float denominator = (float)Math.Sqrt(totalFailed * (failedOfStmt + passedOfStmt));
-            float rank = 0f;
+            float failedPart = (float)failedOfStmt / totalFailed;
+            float passedPart = (float)passedOfStmt / totalPassed;
 
-            if (denominator > 0)
-            {
-                rank = failedOfStmt / denominator;
-            }
+            float rank = failedPart / (failedPart + passedPart);
 
-            ochiaiRank.Add(stmt, rank);
-            Console.WriteLine($"[Ochiai] Statement: {stmt}, Rank: {rank:F3}");
+            tarantulaRank.Add(stmt, rank);
+            Console.WriteLine($"[Tarantula] Statement: {stmt}, Rank: {rank:F3}");
         }
     }
 

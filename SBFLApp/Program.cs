@@ -118,6 +118,9 @@ namespace SBFLApp
             Rank rank = new Rank(testCoverage, testPassFail);
             rank.calculateTarantula();
             rank.calculateOchiai();
+            rank.calculateDStar();
+            rank.calculateJaccard();
+            rank.calculateOp2();
         }
 
         private static void SetInjection(string filePath, List<(string className, string methodName)> targets, string testProjectPath)
