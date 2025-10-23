@@ -61,6 +61,30 @@ namespace SBFLApp
             }
         }
 
+        public static void Clear()
+        {
+            lock (SyncRoot)
+            {
+                _mappings = new Dictionary<string, GuidMappingEntry>(StringComparer.Ordinal);
+
+                if (File.Exists(MappingFilePath))
+                {
+                    try
+                    {
+                        File.Delete(MappingFilePath);
+                    }
+                    catch (IOException ex)
+                    {
+                        Console.WriteLine($"Failed to delete mapping file '{MappingFilePath}': {ex.Message}");
+                    }
+                    catch (UnauthorizedAccessException ex)
+                    {
+                        Console.WriteLine($"Failed to delete mapping file '{MappingFilePath}': {ex.Message}");
+                    }
+                }
+            }
+        }
+
         public static bool TryGetMethodName(string guid, out string? methodName)
         {
             lock (SyncRoot)
