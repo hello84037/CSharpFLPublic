@@ -119,8 +119,12 @@ namespace SBFLApp
             rank.calculateTarantula();
             rank.calculateOchiai();
             rank.calculateDStar();
-            rank.calculateJaccard();
             rank.calculateOp2();
+            rank.calculateJaccard();
+
+            string csvOutputPath = Path.Combine(solutionDirectory, "suspiciousness_report.csv");
+            rank.WriteSuspiciousnessReport(csvOutputPath);
+            Console.WriteLine($"Suspiciousness scores written to {csvOutputPath}.");
         }
 
         private static void SetInjection(string filePath, List<(string className, string methodName)> targets, string testProjectPath)
