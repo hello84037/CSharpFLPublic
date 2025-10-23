@@ -23,9 +23,9 @@ dotnet build
 ```
 
 ## Running the sample
-Executing the console application will instrument the sample tests and compute fault localization rankings for the generated coverage data.
+Executing the console application will instrument the sample tests and compute fault localization rankings for the generated coverage data. Provide the solution directory and the name of the test project so the tool can locate and execute the tests dynamically.
 ```bash
-dotnet run --project MathApp/MathApp.csproj
+dotnet run --project SBFLApp/SBFLApp.csproj . MathApp.Tests
 ```
 
 ## Running the test suite
