@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using SBFLApp;
 
 public class Rank
 {
@@ -197,20 +198,27 @@ public class Rank
 
     public void WriteSuspiciousnessReport(string filePath)
     {
-        var orderedStatements = allStatements.OrderBy(stmt => stmt, StringComparer.Ordinal);
+        var guidMappings = GuidMappingStore.GetMappings();
+        var orderedStatements = allStatements
+            .Select(stmt =>
+            {
+                var displayName = guidMappings.TryGetValue(stmt, out var methodName) ? methodName : stmt;
+                return new { Statement = stmt, Display = displayName };
+            })
+            .OrderBy(entry => entry.Display, StringComparer.Ordinal);
 
         using var writer = new StreamWriter(filePath, false);
         writer.WriteLine("Statement,Tarantula,Ochiai,DStar,Op2,Jaccard");
 
-        foreach (var stmt in orderedStatements)
+        foreach (var entry in orderedStatements)
         {
-            string tarantulaValue = FormatRank(tarantulaRank, stmt);
-            string ochiaiValue = FormatRank(ochiaiRank, stmt);
-            string dStarValue = FormatRank(dStarRank, stmt);
-            string op2Value = FormatRank(op2Rank, stmt);
-            string jaccardValue = FormatRank(jaccardRank, stmt);
+            string tarantulaValue = FormatRank(tarantulaRank, entry.Statement);
+            string ochiaiValue = FormatRank(ochiaiRank, entry.Statement);
+            string dStarValue = FormatRank(dStarRank, entry.Statement);
+            string op2Value = FormatRank(op2Rank, entry.Statement);
+            string jaccardValue = FormatRank(jaccardRank, entry.Statement);
 
-            writer.WriteLine($"{Escape(stmt)},{tarantulaValue},{ochiaiValue},{dStarValue},{op2Value},{jaccardValue}");
+            writer.WriteLine($"{Escape(entry.Display)},{tarantulaValue},{ochiaiValue},{dStarValue},{op2Value},{jaccardValue}");
         }
     }
 

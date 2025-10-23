@@ -1,9 +1,11 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
+using SBFLApp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis;
@@ -26,9 +28,26 @@ namespace MathApp
                 Console.WriteLine($"Method '{methodName}' not found.");
                 return;
             }
-            var rewriter = new CoverageInjector(methodName);
-            var newMethod = (MethodDeclarationSyntax)rewriter.Visit(method);
-            var newRoot = root.ReplaceNode(method, newMethod);
+            var rewriter = new CoverageInjector(methodName, null, null, filePath);
+            var rewrittenRoot = rewriter.Visit(root) as CompilationUnitSyntax;
+            if (rewrittenRoot is null)
+            {
+                Console.WriteLine($"Failed to rewrite method '{methodName}' in '{filePath}'.");
+                return;
+            }
+
+            var updatedMethod = rewrittenRoot
+                .DescendantNodes()
+                .OfType<MethodDeclarationSyntax>()
+                .FirstOrDefault(m => m.Identifier.Text == methodName);
+
+            if (updatedMethod is null)
+            {
+                Console.WriteLine($"Rewritten method '{methodName}' not found in '{filePath}'.");
+                return;
+            }
+
+            var newRoot = rewrittenRoot;
             File.WriteAllText(filePath, newRoot.NormalizeWhitespace().ToFullString());
             Console.WriteLine($"Injected logging into all statements in '{methodName}' in '{filePath}'.");
         }
@@ -39,7 +58,7 @@ namespace MathApp
             var sourceCode = File.ReadAllText(filePath);
             var tree = CSharpSyntaxTree.ParseText(sourceCode);
             var root = tree.GetRoot();
-            var rewriter = new CoverageInjector();
+            var rewriter = new CoverageInjector(sourceFilePath: filePath);
             var newRoot = rewriter.Visit(root);
             File.WriteAllText(filePath, newRoot.NormalizeWhitespace().ToFullString());
             Console.WriteLine($"Injected logging into all methods in '{filePath}'.");
@@ -58,7 +77,7 @@ namespace MathApp
             Directory.CreateDirectory(coverageFolder);
             var coverageFilePath = Path.Combine(coverageFolder, $"{testName}.coverage");
 
-            var rewriter = new CoverageInjector(null, testName, guidCollector);
+            var rewriter = new CoverageInjector(null, testName, guidCollector, filePath);
             var newRoot = rewriter.Visit(root);
 
             File.WriteAllText(filePath, newRoot.NormalizeWhitespace().ToFullString());
@@ -66,6 +85,56 @@ namespace MathApp
 
             File.WriteAllLines(coverageFilePath, guidCollector);
             Console.WriteLine($"Written {guidCollector.Count} GUIDs to '{coverageFilePath}'.");
+        }
+
+        public static void ResetInstrumentation(string rootPath, params string[] additionalPaths)
+        {
+            var pathsToProcess = new List<string>();
+
+            if (!string.IsNullOrWhiteSpace(rootPath))
+            {
+                pathsToProcess.Add(rootPath);
+            }
+
+            if (additionalPaths != null && additionalPaths.Length > 0)
+            {
+                pathsToProcess.AddRange(additionalPaths.Where(p => !string.IsNullOrWhiteSpace(p)));
+            }
+
+            if (pathsToProcess.Count == 0)
+            {
+                Console.WriteLine("No paths provided for instrumentation reset.");
+                return;
+            }
+
+            var cleanupRewriter = new CoverageCleanupRewriter();
+            var processedRoots = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            int sourceFilesCleaned = 0;
+            int coverageFilesRemoved = 0;
+            int coverageDirectoriesRemoved = 0;
+
+            foreach (var path in pathsToProcess)
+            {
+                if (!Directory.Exists(path))
+                {
+                    Console.WriteLine($"Reset skipped missing directory: {path}");
+                    continue;
+                }
+
+                var normalizedPath = Path.GetFullPath(path);
+                if (!processedRoots.Add(normalizedPath))
+                {
+                    continue;
+                }
+
+                sourceFilesCleaned += RemoveInstrumentationFromSource(normalizedPath, cleanupRewriter);
+                coverageFilesRemoved += DeleteCoverageFiles(normalizedPath);
+                coverageDirectoriesRemoved += DeleteCoverageDirectories(normalizedPath);
+            }
+
+            GuidMappingStore.Clear();
+
+            Console.WriteLine($"Instrumentation reset complete. Cleaned {sourceFilesCleaned} source files, removed {coverageFilesRemoved} coverage files, and deleted {coverageDirectoriesRemoved} coverage directories.");
         }
 
         // Instrument every C# file in the project for coverage and save modified copies to a coverage folder
@@ -95,7 +164,7 @@ namespace MathApp
                 var tree = CSharpSyntaxTree.ParseText(sourceCode);
                 var root = tree.GetRoot();
 
-                var rewriter = new CoverageInjector();
+                var rewriter = new CoverageInjector(sourceFilePath: file);
                 var newRoot = rewriter.Visit(root);
 
                 var fileName = Path.GetFileName(file);
@@ -237,13 +306,49 @@ namespace MathApp
             private readonly string? _targetMethodName;
             private readonly string? _testName;
             private readonly List<string>? _guidCollector;
+            private readonly string? _sourceFilePath;
+            private readonly Stack<string> _namespaceStack = new();
+            private readonly Stack<string> _typeStack = new();
             private string _currentMethodName = "";
 
-            public CoverageInjector(string? methodName = null, string? testName = null, List<string>? guidCollector = null)
+            public CoverageInjector(string? methodName = null, string? testName = null, List<string>? guidCollector = null, string? sourceFilePath = null)
             {
                 _targetMethodName = methodName;
                 _testName = testName;
                 _guidCollector = guidCollector;
+                _sourceFilePath = sourceFilePath;
+            }
+
+            public override SyntaxNode VisitNamespaceDeclaration(NamespaceDeclarationSyntax node)
+            {
+                _namespaceStack.Push(node.Name.ToString());
+                var result = base.VisitNamespaceDeclaration(node);
+                _namespaceStack.Pop();
+                return result ?? node;
+            }
+
+            public override SyntaxNode VisitFileScopedNamespaceDeclaration(FileScopedNamespaceDeclarationSyntax node)
+            {
+                _namespaceStack.Push(node.Name.ToString());
+                var result = base.VisitFileScopedNamespaceDeclaration(node);
+                _namespaceStack.Pop();
+                return result ?? node;
+            }
+
+            public override SyntaxNode VisitClassDeclaration(ClassDeclarationSyntax node)
+            {
+                _typeStack.Push(node.Identifier.Text);
+                var result = base.VisitClassDeclaration(node);
+                _typeStack.Pop();
+                return result ?? node;
+            }
+
+            public override SyntaxNode VisitStructDeclaration(StructDeclarationSyntax node)
+            {
+                _typeStack.Push(node.Identifier.Text);
+                var result = base.VisitStructDeclaration(node);
+                _typeStack.Pop();
+                return result ?? node;
             }
 
             // Visit method declarations, process only the target method if specified
@@ -253,7 +358,7 @@ namespace MathApp
                     return node;
 
                 _currentMethodName = node.Identifier.Text;
-                return base.VisitMethodDeclaration(node);
+                return base.VisitMethodDeclaration(node) ?? node;
             }
 
             // Visit blocks and inject logging statements before each original statement
@@ -279,6 +384,14 @@ namespace MathApp
                     );
 
                     _guidCollector?.Add(guid);
+                    var qualifiedName = GetQualifiedMethodName();
+                    if (!string.IsNullOrEmpty(qualifiedName))
+                    {
+                        var sourceFileName = string.IsNullOrWhiteSpace(_sourceFilePath)
+                            ? null
+                            : Path.GetFileName(_sourceFilePath);
+                        GuidMappingStore.AddMapping(guid, qualifiedName, sourceFileName);
+                    }
                     var visitedStatement = (StatementSyntax)Visit(statement);
                     newStatements.Add(logStatement);
                     newStatements.Add(visitedStatement);
@@ -287,7 +400,172 @@ namespace MathApp
                 return node.WithStatements(SyntaxFactory.List(newStatements));
             }
 
+            private string GetQualifiedMethodName()
+            {
+                if (string.IsNullOrEmpty(_currentMethodName))
+                {
+                    return string.Empty;
+                }
 
+                var namespacePrefix = _namespaceStack.Count > 0
+                    ? string.Join('.', _namespaceStack.Reverse()) + "."
+                    : string.Empty;
+
+                var typePrefix = _typeStack.Count > 0
+                    ? string.Join('.', _typeStack.Reverse()) + "."
+                    : string.Empty;
+
+                return $"{namespacePrefix}{typePrefix}{_currentMethodName}";
+            }
+
+
+        }
+
+        private static int RemoveInstrumentationFromSource(string rootPath, CoverageCleanupRewriter rewriter)
+        {
+            var allCsFiles = Directory.GetFiles(rootPath, "*.cs", SearchOption.AllDirectories)
+                .Where(file => !IsInIgnoredDirectory(file))
+                .ToList();
+
+            int cleanedFiles = 0;
+
+            foreach (var file in allCsFiles)
+            {
+                var originalText = File.ReadAllText(file);
+                var tree = CSharpSyntaxTree.ParseText(originalText);
+                var root = tree.GetRoot();
+                SyntaxNode? cleanedRoot = rewriter.Visit(root);
+
+                if (cleanedRoot == null || SyntaxFactory.AreEquivalent(root, cleanedRoot))
+                {
+                    continue;
+                }
+
+                var newText = cleanedRoot.ToFullString();
+                if (!string.Equals(originalText, newText, StringComparison.Ordinal))
+                {
+                    File.WriteAllText(file, newText);
+                }
+
+                cleanedFiles++;
+            }
+
+            return cleanedFiles;
+        }
+
+        private static bool IsInIgnoredDirectory(string filePath)
+        {
+            var normalizedPath = filePath.Replace(Path.AltDirectorySeparatorChar, Path.DirectorySeparatorChar);
+            return normalizedPath.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase) ||
+                   normalizedPath.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase) ||
+                   normalizedPath.Contains($"{Path.DirectorySeparatorChar}coverage{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase) ||
+                   normalizedPath.Contains($".coverage{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static int DeleteCoverageFiles(string rootPath)
+        {
+            var coverageFiles = Directory.GetFiles(rootPath, "*.coverage", SearchOption.AllDirectories);
+            int deletedCount = 0;
+
+            foreach (var file in coverageFiles)
+            {
+                try
+                {
+                    File.Delete(file);
+                    deletedCount++;
+                }
+                catch (IOException ex)
+                {
+                    Console.WriteLine($"Failed to delete coverage file '{file}': {ex.Message}");
+                }
+                catch (UnauthorizedAccessException ex)
+                {
+                    Console.WriteLine($"Failed to delete coverage file '{file}': {ex.Message}");
+                }
+            }
+
+            return deletedCount;
+        }
+
+        private static int DeleteCoverageDirectories(string rootPath)
+        {
+            var directories = Directory.GetDirectories(rootPath, "*.coverage", SearchOption.AllDirectories)
+                .Concat(Directory.GetDirectories(rootPath, "coverage", SearchOption.AllDirectories))
+                .ToList();
+
+            int deletedCount = 0;
+            var processed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var dir in directories)
+            {
+                if (!processed.Add(dir))
+                {
+                    continue;
+                }
+
+                if (!Directory.Exists(dir))
+                {
+                    continue;
+                }
+
+                try
+                {
+                    Directory.Delete(dir, true);
+                    deletedCount++;
+                }
+                catch (IOException ex)
+                {
+                    Console.WriteLine($"Failed to delete coverage directory '{dir}': {ex.Message}");
+                }
+                catch (UnauthorizedAccessException ex)
+                {
+                    Console.WriteLine($"Failed to delete coverage directory '{dir}': {ex.Message}");
+                }
+            }
+
+            return deletedCount;
+        }
+
+        private class CoverageCleanupRewriter : CSharpSyntaxRewriter
+        {
+            public override SyntaxNode? VisitExpressionStatement(ExpressionStatementSyntax node)
+            {
+                if (IsCoverageLoggingStatement(node))
+                {
+                    return null;
+                }
+
+                return base.VisitExpressionStatement(node);
+            }
+
+            private static bool IsCoverageLoggingStatement(ExpressionStatementSyntax node)
+            {
+                if (node.Expression is not InvocationExpressionSyntax invocation ||
+                    invocation.Expression is not MemberAccessExpressionSyntax memberAccess)
+                {
+                    return false;
+                }
+
+                if (!string.Equals(memberAccess.ToString(), "System.IO.File.AppendAllText", StringComparison.Ordinal))
+                {
+                    return false;
+                }
+
+                var arguments = invocation.ArgumentList.Arguments;
+                if (arguments.Count != 2)
+                {
+                    return false;
+                }
+
+                if (arguments[0].Expression is LiteralExpressionSyntax literal &&
+                    literal.IsKind(SyntaxKind.StringLiteralExpression))
+                {
+                    var pathValue = literal.Token.ValueText;
+                    return pathValue.EndsWith(".coverage", StringComparison.OrdinalIgnoreCase);
+                }
+
+                return false;
+            }
         }
     }
 }

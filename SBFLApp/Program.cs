@@ -19,12 +19,13 @@ namespace SBFLApp
 
             if (args.Length < 2)
             {
-                Console.WriteLine("Usage: dotnet run <solutionDirectory> <testProjectName>");
+                Console.WriteLine("Usage: dotnet run <solutionDirectory> <testProjectName> [--reset]");
                 return;
             }
 
             string solutionDirectory = args[0];
             string testProjectName = args[1];
+            bool resetRequested = args.Any(arg => string.Equals(arg, "--reset", StringComparison.OrdinalIgnoreCase) || string.Equals(arg, "-r", StringComparison.OrdinalIgnoreCase));
 
             if (!Directory.Exists(solutionDirectory))
             {
@@ -41,6 +42,12 @@ namespace SBFLApp
 
             string? testProjectFile = Directory.EnumerateFiles(testProjectDirectory, "*.csproj", SearchOption.TopDirectoryOnly).FirstOrDefault();
             string testProjectPath = testProjectFile ?? testProjectDirectory;
+
+            if (resetRequested)
+            {
+                Console.WriteLine("Resetting existing instrumentation artifacts...");
+                Spectrum.ResetInstrumentation(solutionDirectory, AppDomain.CurrentDomain.BaseDirectory);
+            }
 
             var allTestFiles = Directory.EnumerateFiles(testProjectDirectory, "*.cs", SearchOption.AllDirectories)
                 .Where(file => !file.Contains(Path.DirectorySeparatorChar + "bin" + Path.DirectorySeparatorChar)
