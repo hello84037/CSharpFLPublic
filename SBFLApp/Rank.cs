@@ -1,6 +1,9 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Globalization;
+using System.IO;
+using System.Linq;
 
 public class Rank
 {
@@ -106,16 +109,17 @@ public class Rank
         {
             (int failedOfStmt, int passedOfStmt) = GetCoverageCounts(stmt);
 
-            float denominator = (float)Math.Sqrt(totalFailed * (failedOfStmt + passedOfStmt));
+            float failedFraction = totalFailed > 0 ? (float)failedOfStmt / totalFailed : 0f;
+            float passedFraction = totalPassed > 0 ? (float)passedOfStmt / totalPassed : 0f;
+            float denominator = failedFraction + passedFraction;
             float rank = 0f;
 
             if (denominator > 0)
             {
-                rank = failedOfStmt / denominator;
+                rank = failedFraction / denominator;
             }
 
-            ochiaiRank.Add(stmt, rank);
-            Console.WriteLine($"[Ochiai] Statement: {stmt}, Rank: {rank:F3}");
+            tarantulaRank[stmt] = rank;
         }
     }
 
@@ -133,8 +137,7 @@ public class Rank
                 rank = failedOfStmt / denominator;
             }
 
-            ochiaiRank.Add(stmt, rank);
-            Console.WriteLine($"[Ochiai] Statement: {stmt}, Rank: {rank:F3}");
+            ochiaiRank[stmt] = rank;
 
         }
 
@@ -158,8 +161,7 @@ public class Rank
                 rank = float.PositiveInfinity;
             }
 
-            dStarRank.Add(stmt, rank);
-            Console.WriteLine($"[D*] Statement: {stmt}, Rank: {rank:F3}");
+            dStarRank[stmt] = rank;
         }
     }
 
@@ -171,8 +173,7 @@ public class Rank
 
             float rank = failedOfStmt - (float)passedOfStmt / (totalPassed + 1);
 
-            op2Rank.Add(stmt, rank);
-            Console.WriteLine($"[Op2] Statement: {stmt}, Rank: {rank:F3}");
+            op2Rank[stmt] = rank;
         }
     }
 
@@ -190,10 +191,52 @@ public class Rank
                 rank = (float)failedOfStmt / denominatorBase;
             }
 
-            jaccardRank.Add(stmt, rank);
-            Console.WriteLine($"[Jaccard] Statement: {stmt}, Rank: {rank:F3}");
+            jaccardRank[stmt] = rank;
         }
     }
 
+    public void WriteSuspiciousnessReport(string filePath)
+    {
+        var orderedStatements = allStatements.OrderBy(stmt => stmt, StringComparer.Ordinal);
+
+        using var writer = new StreamWriter(filePath, false);
+        writer.WriteLine("Statement,Tarantula,Ochiai,DStar,Op2,Jaccard");
+
+        foreach (var stmt in orderedStatements)
+        {
+            string tarantulaValue = FormatRank(tarantulaRank, stmt);
+            string ochiaiValue = FormatRank(ochiaiRank, stmt);
+            string dStarValue = FormatRank(dStarRank, stmt);
+            string op2Value = FormatRank(op2Rank, stmt);
+            string jaccardValue = FormatRank(jaccardRank, stmt);
+
+            writer.WriteLine($"{Escape(stmt)},{tarantulaValue},{ochiaiValue},{dStarValue},{op2Value},{jaccardValue}");
+        }
+    }
+
+    private static string FormatRank(Dictionary<string, float> ranks, string stmt)
+    {
+        if (ranks.TryGetValue(stmt, out float value))
+        {
+            if (float.IsPositiveInfinity(value))
+            {
+                return "Infinity";
+            }
+
+            return value.ToString("F6", CultureInfo.InvariantCulture);
+        }
+
+        return string.Empty;
+    }
+
+    private static string Escape(string value)
+    {
+        if (value.Contains(',') || value.Contains('"'))
+        {
+            return "\"" + value.Replace("\"", "\"\"") + "\"";
+        }
+
+        return value;
+    }
 
 }
