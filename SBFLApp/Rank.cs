@@ -207,18 +207,30 @@ public class Rank
             })
             .OrderBy(entry => entry.Display, StringComparer.Ordinal);
 
+        var rankColumns = new List<(string Name, Dictionary<string, float> Ranks)>
+        {
+            ("Tarantula", tarantulaRank),
+            ("Ochiai", ochiaiRank),
+            ("DStar", dStarRank),
+            ("Op2", op2Rank),
+            ("Jaccard", jaccardRank)
+        };
+
+        var calculatedColumns = rankColumns
+            .Where(column => column.Ranks != null && column.Ranks.Count > 0)
+            .ToList();
+
         using var writer = new StreamWriter(filePath, false);
-        writer.WriteLine("Statement,Tarantula,Ochiai,DStar,Op2,Jaccard");
+        var headerColumns = new List<string> { "Statement" };
+        headerColumns.AddRange(calculatedColumns.Select(column => column.Name));
+        writer.WriteLine(string.Join(",", headerColumns));
 
         foreach (var entry in orderedStatements)
         {
-            string tarantulaValue = FormatRank(tarantulaRank, entry.Statement);
-            string ochiaiValue = FormatRank(ochiaiRank, entry.Statement);
-            string dStarValue = FormatRank(dStarRank, entry.Statement);
-            string op2Value = FormatRank(op2Rank, entry.Statement);
-            string jaccardValue = FormatRank(jaccardRank, entry.Statement);
+            var values = new List<string> { Escape(entry.Display) };
+            values.AddRange(calculatedColumns.Select(column => FormatRank(column.Ranks, entry.Statement)));
 
-            writer.WriteLine($"{Escape(entry.Display)},{tarantulaValue},{ochiaiValue},{dStarValue},{op2Value},{jaccardValue}");
+            writer.WriteLine(string.Join(",", values));
         }
     }
 
