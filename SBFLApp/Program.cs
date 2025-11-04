@@ -8,6 +8,7 @@ using MathApp;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using System.Diagnostics;
 
 namespace SBFLApp
 {
@@ -356,17 +357,16 @@ namespace SBFLApp
                         return false;
                     }
 
-                    string output = process.StandardOutput.ReadToEnd();
-                    string error = process.StandardError.ReadToEnd();
+                string output = process.StandardOutput.ReadToEnd();
+                string error = process.StandardError.ReadToEnd();
 
-                    Console.WriteLine(output);
-                    if (!string.IsNullOrEmpty(error))
-                    {
-                        Console.WriteLine(error);
-                    }
-
-                    return process.ExitCode == 0;
+                Console.WriteLine(output);
+                if (!string.IsNullOrEmpty(error))
+                {
+                    Console.WriteLine(error);
                 }
+
+                return process.ExitCode == 0;
             }
             catch (Exception ex)
             {
