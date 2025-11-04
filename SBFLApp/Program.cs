@@ -353,10 +353,10 @@ namespace SBFLApp
                     string output = process.StandardOutput.ReadToEnd();
                     string error = process.StandardError.ReadToEnd();
 
-                    //Console.WriteLine(output);
+                    Console.WriteLine(output);
                     if (!string.IsNullOrEmpty(error))
                     {
-                        //Console.WriteLine(error);
+                        Console.WriteLine(error);
                     }
                 }
 
