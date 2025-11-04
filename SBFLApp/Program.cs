@@ -1,12 +1,7 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Diagnostics;
-using System.IO;
-using System.Linq;
-using MathApp;
-using Microsoft.CodeAnalysis;
+﻿using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
+using System.Diagnostics;
 
 namespace SBFLApp
 {
@@ -72,7 +67,7 @@ namespace SBFLApp
                 }
             }
 
-            if (!testFiles.Any())
+            if (testFiles.Count == 0)
             {
                 Console.WriteLine($"No test files found in {testProjectDirectory} matching the provided targets.");
                 return;
@@ -83,8 +78,8 @@ namespace SBFLApp
                 SetInjection(file, targets, testProjectPath);
             }
 
-            Dictionary<string, ISet<string>> testCoverage = new Dictionary<string, ISet<string>>();
-            Dictionary<string, bool> testPassFail = new Dictionary<string, bool>(); ;
+            Dictionary<string, ISet<string>> testCoverage = [];
+            Dictionary<string, bool> testPassFail = []; ;
 
             testPassFail.Add("AdditionTests.AdditionTest", true);
             testPassFail.Add("AdditionTests.AdditionTest2", true);
@@ -122,7 +117,7 @@ namespace SBFLApp
             }
 
 
-            Rank rank = new Rank(testCoverage, testPassFail);
+            Rank rank = new(testCoverage, testPassFail);
             rank.CalculateTarantula();
             rank.CalculateOchiai();
             rank.CalculateDStar();
@@ -214,7 +209,7 @@ namespace SBFLApp
             {
                 string filter = $"FullyQualifiedName~{testName}.{testMethodToRun}";
 
-                ProcessStartInfo startInfo = new ProcessStartInfo(
+                ProcessStartInfo startInfo = new(
                     "dotnet",
                     $"test \"{testProjectPath}\" --no-build --filter \"{filter}\""
                 );
@@ -225,56 +220,31 @@ namespace SBFLApp
                 //    CreateNoWindow = true,
                 //};
 
-                using (Process process = Process.Start(startInfo))
+                using Process process = Process.Start(startInfo);
+                bool exited = process.WaitForExit(30 * 1000);
+                if (!exited)
                 {
-                    bool exited = process.WaitForExit(30 * 1000);
-                    if (!exited)
-                    {
-                        Console.WriteLine("Process timed out. Killing the process...");
-                        process.Kill();
-                        return false;
-                    }
-
-                    string output = process.StandardOutput.ReadToEnd();
-                    string error = process.StandardError.ReadToEnd();
-
-                    Console.WriteLine(output);
-                    if (!string.IsNullOrEmpty(error))
-                    {
-                        Console.WriteLine(error);
-                    }
-
-                    return process.ExitCode == 0;
+                    Console.WriteLine("Process timed out. Killing the process...");
+                    process.Kill();
+                    return false;
                 }
+
+                string output = process.StandardOutput.ReadToEnd();
+                string error = process.StandardError.ReadToEnd();
+
+                Console.WriteLine(output);
+                if (!string.IsNullOrEmpty(error))
+                {
+                    Console.WriteLine(error);
+                }
+
+                return process.ExitCode == 0;
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"Error running test: {ex.Message}");
                 return false;
             }
-        }
-    }
-
-    class LogStatementRewriter : CSharpSyntaxRewriter
-    {
-        private readonly string _newLogStatement;
-
-        public LogStatementRewriter(string newLogStatement)
-        {
-            _newLogStatement = newLogStatement;
-        }
-
-        public override SyntaxNode VisitExpressionStatement(ExpressionStatementSyntax node)
-        {
-            var text = node.ToString();
-            if (text.Contains("System.IO.File.AppendAllText"))
-            {
-                return SyntaxFactory.ParseStatement(_newLogStatement)
-                    .WithLeadingTrivia(node.GetLeadingTrivia())
-                    .WithTrailingTrivia(node.GetTrailingTrivia());
-            }
-
-            return base.VisitExpressionStatement(node);
         }
     }
 }

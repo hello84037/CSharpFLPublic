@@ -1,16 +1,9 @@
-﻿using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
-using System.Text;
-using System.Text.RegularExpressions;
-using System.Threading.Tasks;
-using SBFLApp;
-using Microsoft.CodeAnalysis.CSharp.Syntax;
+﻿using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
-using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
+using System.Text.RegularExpressions;
 
-namespace MathApp
+namespace SBFLApp
 {
     internal class Spectrum
     {
@@ -29,8 +22,7 @@ namespace MathApp
                 return;
             }
             var rewriter = new CoverageInjector(methodName, null, null, filePath);
-            var rewrittenRoot = rewriter.Visit(root) as CompilationUnitSyntax;
-            if (rewrittenRoot is null)
+            if (rewriter.Visit(root) is not CompilationUnitSyntax rewrittenRoot)
             {
                 Console.WriteLine($"Failed to rewrite method '{methodName}' in '{filePath}'.");
                 return;

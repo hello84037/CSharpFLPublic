@@ -9,25 +9,23 @@ namespace MathApp
     {
         public static int Subtract(int a, int b)
         {
-            int diff = 0;
             for (var i = 0; i < 1; i++)
             {
                 int c = 0;
                 c += a;
             }
-            diff = a - b + 1;
+            int diff = a - b + 1;
             return diff;
         }
 
         public static int Add(int a, int b)
         {
-            int sum = 0;
             for (var i = 0; i < 1; i++)
             {
                 int c = 0;
                 c += a;
             }
-            sum = a + b;
+            int sum = a + b;
             return sum;
         }
 
@@ -53,6 +51,14 @@ namespace MathApp
             }
             product = a * b;
             return product;
+        }
+
+        public static double Modulus(double a, double b)
+        {
+            if (b == 0)
+                throw new ArgumentException("Parameter b cannot be 0");
+            else
+                return a % b;
         }
     }
 }
