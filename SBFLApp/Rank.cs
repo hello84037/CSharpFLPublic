@@ -166,7 +166,7 @@ public class Rank
         }
     }
 
-    public void calculateOp2()
+    public void CalculateOp2()
     {
         foreach (string stmt in allStatements)
         {
@@ -178,7 +178,7 @@ public class Rank
         }
     }
 
-    public void calculateJaccard()
+    public void CalculateJaccard()
     {
         foreach (string stmt in allStatements)
         {

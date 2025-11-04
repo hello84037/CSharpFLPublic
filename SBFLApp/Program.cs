@@ -126,8 +126,8 @@ namespace SBFLApp
             rank.calculateTarantula();
             rank.calculateOchiai();
             rank.calculateDStar();
-            rank.calculateOp2();
-            rank.calculateJaccard();
+            rank.CalculateOp2();
+            rank.CalculateJaccard();
 
             string csvOutputPath = Path.Combine(solutionDirectory, "suspiciousness_report.csv");
             rank.WriteSuspiciousnessReport(csvOutputPath);
