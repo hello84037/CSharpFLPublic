@@ -9,12 +9,11 @@ namespace SBFLApp
     {
         static void Main(string[] args)
         {
-
-            Console.WriteLine("Running the Spetrum Based Fault Localizer Application\n");
+            LogMessage("Running the Spetrum Based Fault Localizer Application\n");
 
             if (args.Length < 2)
             {
-                Console.WriteLine("Usage: dotnet run <solutionDirectory> <testProjectName> [--reset]");
+                LogWarning("Usage: dotnet run <solutionDirectory> <testProjectName> [--reset]");
                 return;
             }
 
@@ -24,14 +23,14 @@ namespace SBFLApp
 
             if (!Directory.Exists(solutionDirectory))
             {
-                Console.WriteLine($"Solution directory not found: {solutionDirectory}");
+                LogError($"Solution directory not found: {solutionDirectory}");
                 return;
             }
 
             string testProjectDirectory = Path.Combine(solutionDirectory, testProjectName);
             if (!Directory.Exists(testProjectDirectory))
             {
-                Console.WriteLine($"Test project directory not found: {testProjectDirectory}");
+                LogError($"Test project directory not found: {testProjectDirectory}");
                 return;
             }
 
@@ -53,11 +52,11 @@ namespace SBFLApp
 
             if (discoveredTests.Count == 0)
             {
-                Console.WriteLine($"No tests discovered in {testProjectDirectory}.");
+                LogError($"No tests discovered in {testProjectDirectory}.");
                 return;
             }
 
-            Console.WriteLine("Discovered the following tests:");
+            LogMessage("Discovered the following tests:");
             foreach (var test in discoveredTests)
             {
                 Console.WriteLine($" - {test.FullyQualifiedName}");
@@ -80,7 +79,7 @@ namespace SBFLApp
 
             string csvOutputPath = Path.Combine(solutionDirectory, "suspiciousness_report.csv");
             rank.WriteSuspiciousnessReport(csvOutputPath);
-            Console.WriteLine($"Suspiciousness scores written to {csvOutputPath}.");
+            LogMessage($"Suspiciousness scores written to {csvOutputPath}.");
         }
 
         private sealed record DiscoveredTest(string FilePath, string TypeDisplayName, string MethodName, string FullyQualifiedName)
@@ -161,9 +160,9 @@ namespace SBFLApp
                     break;
                 }
 
-                if (!guidSet.Any())
+                if (guidSet.Count == 0)
                 {
-                    Console.WriteLine($"Coverage file not found or empty for test: {coverageFileName}");
+                    LogError($"Coverage file not found or empty for test: {coverageFileName}");
                 }
 
                 coverage[fileKey] = guidSet;
@@ -247,7 +246,7 @@ namespace SBFLApp
             string testProjectPath,
             Dictionary<string, bool> testPassFail)
         {
-            Console.WriteLine("Injection and testing in progress...");
+            LogMessage("Injection and testing in progress...");
 
             string sourceCode = File.ReadAllText(filePath);
             var syntaxTree = CSharpSyntaxTree.ParseText(sourceCode);
@@ -262,7 +261,7 @@ namespace SBFLApp
 
                 if (methodNode == null)
                 {
-                    Console.WriteLine($"Skipping instrumentation for '{test.FullyQualifiedName}' because the method could not be located in '{filePath}'.");
+                    LogWarning($"Skipping instrumentation for '{test.FullyQualifiedName}' because the method could not be located in '{filePath}'.");
                     bool fallbackResult = RunTest(testProjectPath, test.FullyQualifiedName);
                     testPassFail[test.CoverageFileStem] = fallbackResult;
                     continue;
@@ -317,7 +316,7 @@ namespace SBFLApp
             }
         }
 
-        private static bool RunTest(string testProjectPath, string fullyQualifiedTestName)
+        private static bool RunTest(string testProjectPath, string fullyQualifiedTestName, bool displayTestOutput = false)
         {
             try
             {
@@ -326,45 +325,79 @@ namespace SBFLApp
                 var startInfo = new ProcessStartInfo(
                     "dotnet",
                     $"test \"{testProjectPath}\" --no-build --filter \"{filter}\""
-                );
-                //{
-                //    RedirectStandardOutput = true,
-                //    RedirectStandardError = true,
-                //    UseShellExecute = false,
-                //    CreateNoWindow = true,
-                //};
+                )
+                {
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                };
 
                 using Process? process = Process.Start(startInfo);
                 if (process is null)
                 {
-                    Console.WriteLine("Failed to start test process.");
+                    LogError("Failed to start test process.");
                     return false;
                 }
 
                 bool exited = process.WaitForExit(30 * 1000);
                 if (!exited)
-                {
-                    Console.WriteLine("Process timed out. Killing the process...");
+                { 
+                    LogWarning("Process timed out. Killing the process...");
                     process.Kill();
                     return false;
                 }
 
-                string output = process.StandardOutput.ReadToEnd();
-                string error = process.StandardError.ReadToEnd();
-
-                Console.WriteLine(output);
-                if (!string.IsNullOrEmpty(error))
+                if (displayTestOutput)
                 {
-                    Console.WriteLine(error);
+                    string output = process.StandardOutput.ReadToEnd();
+                    string error = process.StandardError.ReadToEnd();
+
+                    //Console.WriteLine(output);
+                    if (!string.IsNullOrEmpty(error))
+                    {
+                        //Console.WriteLine(error);
+                    }
                 }
 
                 return process.ExitCode == 0;
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Error running test: {ex.Message}");
+                LogError($"Error running test: {ex.Message}");
                 return false;
             }
         }
+
+        private static void LogMessage(string message)
+{
+            ConsoleWriteLine($"Info: {message}", ConsoleColor.Cyan);
+
+}
+
+        private static void LogWarning(string message)
+        {
+            ConsoleWriteLine($"Warning: {message}", ConsoleColor.DarkYellow);
+        }
+
+        private static void LogError(string message)
+        {
+            ConsoleWriteLine($"Error: {message}", ConsoleColor.Red);
+        }
+
+        private static void ConsoleWriteLine(string message, ConsoleColor color = ConsoleColor.Gray)
+        {
+            Console.ForegroundColor = color;
+            Console.WriteLine(message);
+            Console.ResetColor();
+        }
+
+        static void ConsoleWrite(string message, ConsoleColor color = ConsoleColor.Gray)
+        {
+            Console.ForegroundColor = color;
+            Console.Write(message);
+            Console.ResetColor();
+        }
+
     }
 }

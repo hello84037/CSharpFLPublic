@@ -219,7 +219,6 @@ namespace SBFLApp
                 .ToList();
 
             using var writer = new StreamWriter(filePath, false);
-            writer.WriteLine("Statement,Tarantula,Ochiai,DStar,Op2,Jaccard");
             var headerColumns = new List<string> { "Statement" };
             headerColumns.AddRange(calculatedColumns.Select(column => column.Name));
             writer.WriteLine(string.Join(",", headerColumns));
