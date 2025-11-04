@@ -1,11 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Diagnostics;
-using System.IO;
-using System.Linq;
-using System.Threading;
-using MathApp;
-using Microsoft.CodeAnalysis;
+﻿using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using System.Diagnostics;
@@ -58,7 +51,7 @@ namespace SBFLApp
 
             var discoveredTests = DiscoverTests(allTestFiles);
 
-            if (!discoveredTests.Any())
+            if (discoveredTests.Count == 0)
             {
                 Console.WriteLine($"No tests discovered in {testProjectDirectory}.");
                 return;
@@ -78,12 +71,12 @@ namespace SBFLApp
 
             var testCoverage = BuildTestCoverage(discoveredTests);
 
-            Rank rank = new Rank(testCoverage, testPassFail);
-            rank.calculateTarantula();
-            rank.calculateOchiai();
-            rank.calculateDStar();
-            rank.calculateOp2();
-            rank.calculateJaccard();
+            Rank rank = new(testCoverage, testPassFail);
+            rank.CalculateTarantula();
+            rank.CalculateOchiai();
+            rank.CalculateDStar();
+            rank.CalculateOp2();
+            rank.CalculateJaccard();
 
             string csvOutputPath = Path.Combine(solutionDirectory, "suspiciousness_report.csv");
             rank.WriteSuspiciousnessReport(csvOutputPath);
@@ -333,29 +326,28 @@ namespace SBFLApp
                 var startInfo = new ProcessStartInfo(
                     "dotnet",
                     $"test \"{testProjectPath}\" --no-build --filter \"{filter}\""
-                )
-                {
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    UseShellExecute = false,
-                    CreateNoWindow = true,
-                };
+                );
+                //{
+                //    RedirectStandardOutput = true,
+                //    RedirectStandardError = true,
+                //    UseShellExecute = false,
+                //    CreateNoWindow = true,
+                //};
 
-                using (Process? process = Process.Start(startInfo))
+                using Process? process = Process.Start(startInfo);
+                if (process is null)
                 {
-                    if (process is null)
-                    {
-                        Console.WriteLine("Failed to start test process.");
-                        return false;
-                    }
+                    Console.WriteLine("Failed to start test process.");
+                    return false;
+                }
 
-                    bool exited = process.WaitForExit(30 * 1000);
-                    if (!exited)
-                    {
-                        Console.WriteLine("Process timed out. Killing the process...");
-                        process.Kill();
-                        return false;
-                    }
+                bool exited = process.WaitForExit(30 * 1000);
+                if (!exited)
+                {
+                    Console.WriteLine("Process timed out. Killing the process...");
+                    process.Kill();
+                    return false;
+                }
 
                 string output = process.StandardOutput.ReadToEnd();
                 string error = process.StandardError.ReadToEnd();
@@ -373,29 +365,6 @@ namespace SBFLApp
                 Console.WriteLine($"Error running test: {ex.Message}");
                 return false;
             }
-        }
-    }
-
-    class LogStatementRewriter : CSharpSyntaxRewriter
-    {
-        private readonly string _newLogStatement;
-
-        public LogStatementRewriter(string newLogStatement)
-        {
-            _newLogStatement = newLogStatement;
-        }
-
-        public override SyntaxNode VisitExpressionStatement(ExpressionStatementSyntax node)
-        {
-            var text = node.ToString();
-            if (text.Contains("System.IO.File.AppendAllText"))
-            {
-                return SyntaxFactory.ParseStatement(_newLogStatement)
-                    .WithLeadingTrivia(node.GetLeadingTrivia())
-                    .WithTrailingTrivia(node.GetTrailingTrivia());
-            }
-
-            return base.VisitExpressionStatement(node) ?? node;
         }
     }
 }
