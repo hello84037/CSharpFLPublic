@@ -193,6 +193,23 @@ namespace SBFLApp
             }
         }
 
+        var rankColumns = new List<(string Name, Dictionary<string, float> Ranks)>
+        {
+            ("Tarantula", tarantulaRank),
+            ("Ochiai", ochiaiRank),
+            ("DStar", dStarRank),
+            ("Op2", op2Rank),
+            ("Jaccard", jaccardRank)
+        };
+
+        var calculatedColumns = rankColumns
+            .Where(column => column.Ranks != null && column.Ranks.Count > 0)
+            .ToList();
+
+        using var writer = new StreamWriter(filePath, false);
+        var headerColumns = new List<string> { "Statement" };
+        headerColumns.AddRange(calculatedColumns.Select(column => column.Name));
+        writer.WriteLine(string.Join(",", headerColumns));
         public void WriteSuspiciousnessReport(string filePath)
         {
             var guidMappings = GuidMappingStore.GetMappings();
@@ -206,6 +223,10 @@ namespace SBFLApp
 
             var rankColumns = new List<(string Name, Dictionary<string, float> Ranks)>
         {
+            var values = new List<string> { Escape(entry.Display) };
+            values.AddRange(calculatedColumns.Select(column => FormatRank(column.Ranks, entry.Statement)));
+
+            writer.WriteLine(string.Join(",", values));
             ("Tarantula", tarantulaRank),
             ("Ochiai", ochiaiRank),
             ("DStar", dStarRank),
