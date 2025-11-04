@@ -123,9 +123,9 @@ namespace SBFLApp
 
 
             Rank rank = new Rank(testCoverage, testPassFail);
-            rank.calculateTarantula();
-            rank.calculateOchiai();
-            rank.calculateDStar();
+            rank.CalculateTarantula();
+            rank.CalculateOchiai();
+            rank.CalculateDStar();
             rank.CalculateOp2();
             rank.CalculateJaccard();
 

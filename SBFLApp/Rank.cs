@@ -104,7 +104,7 @@ public class Rank
         return (failedOfStmt, passedOfStmt);
     }
 
-    public void calculateTarantula()
+    public void CalculateTarantula()
     {
         foreach (string stmt in allStatements)
         {
@@ -124,7 +124,7 @@ public class Rank
         }
     }
 
-    public void calculateOchiai()
+    public void CalculateOchiai()
     {
         foreach (string stmt in allStatements)
         {
@@ -144,7 +144,7 @@ public class Rank
 
     }
 
-    public void calculateDStar()
+    public void CalculateDStar()
     {
         foreach (string stmt in allStatements)
         {
