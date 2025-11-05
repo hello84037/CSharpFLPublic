@@ -68,7 +68,10 @@ namespace SBFLApp
                 SetInjection(group.Key, group.ToList(), testProjectPath, testPassFail);
             }
 
-            var testCoverage = BuildTestCoverage(discoveredTests);
+            var testCoverage = BuildTestCoverage(
+                discoveredTests,
+                solutionDirectory,
+                testProjectDirectory);
 
             Rank rank = new(testCoverage, testPassFail);
             rank.CalculateTarantula();
@@ -126,27 +129,58 @@ namespace SBFLApp
                 .ToList();
         }
 
-        /// <summary>
-        /// 
-        /// </summary>
-        /// <param name="tests"></param>
-        /// <returns></returns>
-        private static Dictionary<string, ISet<string>> BuildTestCoverage(IEnumerable<DiscoveredTest> tests)
+        private static Dictionary<string, ISet<string>> BuildTestCoverage(
+            IEnumerable<DiscoveredTest> tests,
+            string solutionDirectory,
+            string testProjectDirectory)
         {
             var coverage = new Dictionary<string, ISet<string>>(StringComparer.OrdinalIgnoreCase);
 
-            // Generate a coverage file for every test function.
+            var candidateRoots = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                Directory.GetCurrentDirectory(),
+                AppDomain.CurrentDomain.BaseDirectory,
+                solutionDirectory,
+                testProjectDirectory
+            };
+
+            var binDirectory = Path.Combine(testProjectDirectory, "bin");
+            var binCoverageFiles = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+            if (Directory.Exists(binDirectory))
+            {
+                foreach (var path in Directory.EnumerateFiles(binDirectory, "*.coverage", SearchOption.AllDirectories))
+                {
+                    var fileName = Path.GetFileName(path);
+                    binCoverageFiles[fileName] = path;
+                }
+
+                foreach (var directory in Directory.EnumerateDirectories(binDirectory, "*", SearchOption.AllDirectories))
+                {
+                    candidateRoots.Add(directory);
+                }
+            }
+
             foreach (var test in tests)
             {
                 string fileKey = test.CoverageFileStem;
                 string coverageFileName = $"{fileKey}.coverage";
                 var guidSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-                var searchPaths = new[]
+                var searchPaths = new List<string>();
+
+                foreach (var root in candidateRoots)
                 {
-                    coverageFileName,
-                    Path.Combine(AppDomain.CurrentDomain.BaseDirectory, coverageFileName)
-                };
+                    if (!string.IsNullOrWhiteSpace(root))
+                    {
+                        searchPaths.Add(Path.Combine(root, coverageFileName));
+                    }
+                }
+
+                if (binCoverageFiles.TryGetValue(coverageFileName, out var locatedPath))
+                {
+                    searchPaths.Add(locatedPath);
+                }
 
                 foreach (var path in searchPaths)
                 {
@@ -373,7 +407,7 @@ namespace SBFLApp
 
                 var startInfo = new ProcessStartInfo(
                     "dotnet",
-                    $"test \"{testProjectPath}\" --no-build --filter \"{filter}\""
+                    $"test \"{testProjectPath}\" --filter \"{filter}\""
                 )
                 {
                     RedirectStandardOutput = true,
