@@ -1,49 +1,40 @@
 using System.Collections;
+using System.Collections.Generic;
 using System.Globalization;
 
 namespace SBFLApp
 {
     public class Rank
     {
-        public Dictionary<string, float> tarantulaRank;
-        public Dictionary<string, float> ochiaiRank;
-        public Dictionary<string, float> dStarRank;
-        public Dictionary<string, float> op2Rank;
-        public Dictionary<string, float> jaccardRank;
+        public Dictionary<string, float> tarantulaRank = [];
+        public Dictionary<string, float> ochiaiRank = [];
+        public Dictionary<string, float> dStarRank = [];
+        public Dictionary<string, float> op2Rank = [];
+        public Dictionary<string, float> jaccardRank = [];
 
-        private readonly Dictionary<string, ISet<string>> testCoverage;
-        private readonly Hashtable hashCoverage;
-        private readonly Dictionary<string, bool> testPassFail;
-        private readonly Hashtable hashPassFail;
+        private readonly Dictionary<string, ISet<string>> testCoverage = [];
+        private readonly Hashtable hashCoverage = [];
+        private readonly Dictionary<string, bool> testPassFail = [];
+        private readonly Hashtable hashPassFail = [];
         private readonly int totalFailed;
         private readonly int totalPassed;
-        private readonly HashSet<string> allStatements;
-        private readonly HashSet<string> failed;
-        private readonly HashSet<string> passed;
-        private readonly List<string> finalRanking;
+        private readonly Dictionary<string, (int failed, int passed)> allStatements = [];
+        private readonly HashSet<string> failed = [];
+        private readonly HashSet<string> passed = [];
 
         public Rank(Dictionary<string, ISet<string>> testCoverage, Dictionary<string, bool> tastPassFail)
         {
             this.testCoverage = testCoverage;
             this.testPassFail = tastPassFail;
-            allStatements = [];
-            failed = [];
-            passed = [];
-            tarantulaRank = [];
-            ochiaiRank = [];
-            dStarRank = [];
-            op2Rank = [];
-            jaccardRank = [];
-            finalRanking = [];
 
             hashCoverage = new Hashtable(testCoverage);
-
+            HashSet<string> statements = [];
 
             foreach (var key1 in hashCoverage.Keys)
             {
                 if (hashCoverage[key1] is ISet<string> statementSet) // Ensure type safety
                 {
-                    allStatements.UnionWith(statementSet);
+                    statements.UnionWith(statementSet);
                 }
             }
 
@@ -67,8 +58,22 @@ namespace SBFLApp
 
             totalFailed = failed.Count;
             totalPassed = passed.Count;
+
+            // Create a Dictionary where HashSet values are keys and a default value is assigned
+            // For demonstration, we'll assign the length of the string as the value.
+            allStatements = statements.ToDictionary(key => key, value => (0, 0));
+
+            foreach (string stmt in allStatements.Keys)
+            {
+                allStatements[stmt] = GetCoverageCounts(stmt);
+            }
         }
 
+        /// <summary>
+        /// Get the number of failing and passing tests covering this statement.
+        /// </summary>
+        /// <param name="stmt">The statement to check coverage for.</param>
+        /// <returns>The number of failing and passing tests covering this statement.</returns>
         private (int failedCovered, int passedCovered) GetCoverageCounts(string stmt)
         {
             int failedOfStmt = 0;
@@ -76,6 +81,7 @@ namespace SBFLApp
 
             try
             {
+                // Go through the failed tests and check to see if this statement is covered.
                 foreach (string test in failed)
                 {
                     ISet<string> statementCoveredByTest = testCoverage[test];
@@ -85,6 +91,7 @@ namespace SBFLApp
                     }
                 }
 
+                // Go through the passing tests and check to see if this statement is covered.
                 foreach (string test in passed)
                 {
                     ISet<string> statementCoveredByTest = testCoverage[test];
@@ -102,14 +109,18 @@ namespace SBFLApp
             return (failedOfStmt, passedOfStmt);
         }
 
+        /// <summary>
+        /// Calculate the Tarantula SBFL score based on the current statement and it's coverage.
+        /// </summary>
         public void CalculateTarantula()
         {
-            foreach (string stmt in allStatements)
+            foreach (string stmt in allStatements.Keys)
             {
-                (int failedOfStmt, int passedOfStmt) = GetCoverageCounts(stmt);
+                // Get the current statement statistics
+                var statement = allStatements[stmt];
 
-                float failedFraction = totalFailed > 0 ? (float)failedOfStmt / totalFailed : 0f;
-                float passedFraction = totalPassed > 0 ? (float)passedOfStmt / totalPassed : 0f;
+                float failedFraction = totalFailed > 0 ? (float)statement.failed / totalFailed : 0f;
+                float passedFraction = totalPassed > 0 ? (float)statement.passed / totalPassed : 0f;
                 float denominator = failedFraction + passedFraction;
                 float rank = 0f;
 
@@ -122,18 +133,22 @@ namespace SBFLApp
             }
         }
 
+        /// <summary>
+        /// Calculate the Ochiai SBFL score based on the current statement and it's coverage.
+        /// </summary>
         public void CalculateOchiai()
         {
-            foreach (string stmt in allStatements)
-            {
-                (int failedOfStmt, int passedOfStmt) = GetCoverageCounts(stmt);
+            foreach (string stmt in allStatements.Keys)
+            { 
+                // Get the current statement statistics
+                var statement = allStatements[stmt];
 
-                float denominator = (float)Math.Sqrt(totalFailed * (failedOfStmt + passedOfStmt));
+                float denominator = (float)Math.Sqrt(totalFailed * (statement.failed + statement.passed));
                 float rank = 0f;
 
                 if (denominator > 0)
                 {
-                    rank = failedOfStmt / denominator;
+                    rank = statement.failed / denominator;
                 }
 
                 ochiaiRank[stmt] = rank;
@@ -142,20 +157,24 @@ namespace SBFLApp
 
         }
 
+        /// <summary>
+        /// Calculate the DStar SBFL score based on the current statement and it's coverage.
+        /// </summary>
         public void CalculateDStar()
         {
-            foreach (string stmt in allStatements)
+            foreach (string stmt in allStatements.Keys)
             {
-                (int failedOfStmt, int passedOfStmt) = GetCoverageCounts(stmt);
+                // Get the current statement statistics
+                var statement = allStatements[stmt];
 
-                int denominatorBase = passedOfStmt + (totalFailed - failedOfStmt);
+                int denominatorBase = statement.passed + (totalFailed - statement.failed);
                 float rank = 0f;
 
                 if (denominatorBase > 0)
                 {
-                    rank = (float)(failedOfStmt * failedOfStmt) / denominatorBase;
+                    rank = (float)(statement.failed * statement.failed) / denominatorBase;
                 }
-                else if (failedOfStmt > 0)
+                else if (statement.failed > 0)
                 {
                     rank = float.PositiveInfinity;
                 }
@@ -164,30 +183,38 @@ namespace SBFLApp
             }
         }
 
+        /// <summary>
+        /// Calculate the Op2 SBFL score based on the current statement and it's coverage.
+        /// </summary>
         public void CalculateOp2()
         {
-            foreach (string stmt in allStatements)
+            foreach (string stmt in allStatements.Keys)
             {
-                (int failedOfStmt, int passedOfStmt) = GetCoverageCounts(stmt);
+                // Get the current statement statistics
+                var statement = allStatements[stmt];
 
-                float rank = failedOfStmt - (float)passedOfStmt / (totalPassed + 1);
+                float rank = statement.failed - (float)statement.passed / (totalPassed + 1);
 
                 op2Rank[stmt] = rank;
             }
         }
 
+        /// <summary>
+        /// Calculate the Jaccard SBFL score based on the current statement and it's coverage.
+        /// </summary>
         public void CalculateJaccard()
         {
-            foreach (string stmt in allStatements)
+            foreach (string stmt in allStatements.Keys)
             {
-                (int failedOfStmt, int passedOfStmt) = GetCoverageCounts(stmt);
+                // Get the current statement statistics
+                var statement = allStatements[stmt];
 
-                int denominatorBase = totalFailed + passedOfStmt;
+                int denominatorBase = totalFailed + statement.passed;
                 float rank = 0f;
 
                 if (denominatorBase > 0)
                 {
-                    rank = (float)failedOfStmt / denominatorBase;
+                    rank = (float)statement.failed / denominatorBase;
                 }
 
                 jaccardRank[stmt] = rank;
@@ -197,7 +224,7 @@ namespace SBFLApp
         public void WriteSuspiciousnessReport(string filePath)
         {
             var guidMappings = GuidMappingStore.GetMappings();
-            var orderedStatements = allStatements
+            var orderedStatements = allStatements.Keys
                 .Select(stmt =>
                 {
                     var displayName = guidMappings.TryGetValue(stmt, out var methodName) ? methodName : stmt;
@@ -247,6 +274,11 @@ namespace SBFLApp
             return string.Empty;
         }
 
+        /// <summary>
+        /// Fix characters for CSV formatting.
+        /// </summary>
+        /// <param name="value">The string to adjust escape characters on.</param>
+        /// <returns>The corrected string.</returns>
         private static string Escape(string value)
         {
             if (value.Contains(',') || value.Contains('"'))
