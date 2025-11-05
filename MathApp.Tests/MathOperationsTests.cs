@@ -8,7 +8,7 @@ namespace MathApp.Tests
 {
     public class MathOperationsTests
     {
-#region Addition Tests
+        #region Addition Tests
         [Fact]
         public void AdditionTest()
         {
@@ -36,8 +36,9 @@ namespace MathApp.Tests
             Assert.Equal(10, result);
         }
 
-#endregion
-#region Division Tests
+        #endregion
+
+        #region Division Tests
         [Fact]
         public void DivisionTest()
         {
@@ -65,8 +66,9 @@ namespace MathApp.Tests
             Assert.Equal(75.0, result);
         }
 
-#endregion
-#region Multiplication Tests
+        #endregion
+
+        #region Multiplication Tests
         [Fact]
         public void MultiplicationTest()
         {
@@ -94,8 +96,9 @@ namespace MathApp.Tests
             Assert.Equal(300.0, result);
         }
 
-#endregion
-#region Subtraction Tests
+        #endregion
+
+        #region Subtraction Tests
         [Fact]
         public void SubtractionTest()
         {
@@ -124,6 +127,7 @@ namespace MathApp.Tests
             Assert.Equal(6, result);
         }
         #endregion
+
 
         #region Modulus Tests
         [Theory]
