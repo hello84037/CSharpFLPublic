@@ -69,12 +69,16 @@ namespace SBFLApp
                 Console.WriteLine($" - {test.FullyQualifiedName}");
             }
 
+            var productionSourceFiles = DiscoverProductionSourceFiles(solutionDirectory, testProjectDirectory);
+
+            if (productionSourceFiles.Count == 0)
+            {
+                LogWarning("No production source files discovered for instrumentation.");
+            }
+
             // Create a dictionary for storing the test and the pass/fail status
             var testPassFail = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
-            foreach (var group in discoveredTests.GroupBy(test => test.FilePath, StringComparer.OrdinalIgnoreCase))
-            {
-                SetInjection(group.Key, group.ToList(), testProjectPath, ref testPassFail);
-            }
+            SetInjection(productionSourceFiles, discoveredTests, testProjectPath, ref testPassFail);
 
             var testCoverage = BuildTestCoverage(
                 discoveredTests,
@@ -274,82 +278,93 @@ namespace SBFLApp
         }
 
         /// <summary>
-        /// 
+        /// Ensures the production code is instrumented for coverage and executes each discovered test.
         /// </summary>
-        /// <param name="filePath">The path to the test file.</param>
-        /// <param name="tests">The <see cref="DiscoveredTest"/> objects associated with the file.</param>
+        /// <param name="sourceFiles">The production source files targeted for instrumentation.</param>
+        /// <param name="tests">The <see cref="DiscoveredTest"/> instances to execute.</param>
         /// <param name="testProjectPath">The path to the test csproj file.</param>
         /// <param name="testPassFail">A dictionary to store the test and test result.</param>
         private static void SetInjection(
-            in string filePath,
+            in IReadOnlyList<string> sourceFiles,
             in IReadOnlyList<DiscoveredTest> tests,
             in string testProjectPath,
             ref Dictionary<string, bool> testPassFail)
         {
             LogMessage("Injection and testing in progress...");
 
-            // Read the source code for the given file.
-            string sourceCode = File.ReadAllText(filePath);
+            var instrumentedFiles = EnsureProductionInstrumentation(sourceFiles);
 
-            // Create an abstract syntax tree to represent the file.
-            var syntaxTree = CSharpSyntaxTree.ParseText(sourceCode);
-            var root = syntaxTree.GetRoot();
-
-            // Create a copy of the tree to modify with instrumentation data.
-            var updatedRoot = root;
-
-            // Process each test.
             foreach (var test in tests)
             {
-                // Search the root for the specific test method.
-                var methodNode = SyntaxTreeHelpers.FindMethod(updatedRoot, test.MethodName, test.TypeDisplayName);
-
-                // If the method wasn't located, don't modify the source code, just run the test.
-                if (methodNode == null)
-                {
-                    LogWarning($"Skipping instrumentation for '{test.FullyQualifiedName}' because the method could not be located in '{filePath}'.");
-
-                    // Run the test anyway to get the pass/fail result.
-                    bool fallbackResult = RunTest(testProjectPath, test.FullyQualifiedName);
-
-                    // Save the pass/fail results in the referenced dictionary then skip the instrumentation.
-                    testPassFail[test.CoverageFileStem] = fallbackResult;
-                    continue;
-                }
-
-                // Check the method for existing instrumentation.
-                bool alreadyInstrumented = methodNode.DescendantNodes()
-                    .OfType<ExpressionStatementSyntax>()
-                    .Any(stmt => stmt.ToString().Contains("System.IO.File.AppendAllText"));
-
                 // Get the coverage filename and delete if there is an existing one.
                 string coverageFileName = $"{test.CoverageFileStem}.coverage";
                 DeleteCoverageFile(coverageFileName);
 
-                //If the files were already instrumented, we are going to update them to make sure they are correct. 
-                if (alreadyInstrumented)
+                foreach (var file in instrumentedFiles)
                 {
-                    updatedRoot = RewriteCoverageStatements(filePath, updatedRoot, methodNode, coverageFileName);
-                }
-                else
-                {
-                    Spectrum.SpectrumMethod(filePath, test.MethodName, coverageFileName);
-
-                    string reloadedCode = File.ReadAllText(filePath);
-                    updatedRoot = CSharpSyntaxTree.ParseText(reloadedCode).GetRoot();
-
-                    var reloadedMethod = SyntaxTreeHelpers.FindMethod(updatedRoot, test.MethodName, test.TypeDisplayName);
-
-                    if (reloadedMethod != null)
-                    {
-                        updatedRoot = RewriteCoverageStatements(filePath, updatedRoot, reloadedMethod, coverageFileName);
-                    }
+                    UpdateCoverageFileTarget(file, coverageFileName);
                 }
 
                 // Run the test silently
                 bool passed = RunTest(testProjectPath, test.FullyQualifiedName);
                 testPassFail[test.CoverageFileStem] = passed;
             }
+        }
+
+        private static IReadOnlyList<string> EnsureProductionInstrumentation(IReadOnlyList<string> sourceFiles)
+        {
+            var instrumentedFiles = new List<string>();
+
+            foreach (var file in sourceFiles)
+            {
+                try
+                {
+                    string sourceCode = File.ReadAllText(file);
+
+                    if (!ContainsCoverageInstrumentation(sourceCode))
+                    {
+                        Spectrum.SpectrumAll(file);
+                        sourceCode = File.ReadAllText(file);
+                    }
+
+                    if (ContainsCoverageInstrumentation(sourceCode))
+                    {
+                        instrumentedFiles.Add(file);
+                    }
+                    else
+                    {
+                        LogWarning($"Instrumentation could not be added to '{file}'.");
+                    }
+                }
+                catch (IOException ex)
+                {
+                    LogWarning($"Failed to instrument '{file}': {ex.Message}");
+                }
+                catch (UnauthorizedAccessException ex)
+                {
+                    LogWarning($"Failed to instrument '{file}': {ex.Message}");
+                }
+            }
+
+            return instrumentedFiles;
+        }
+
+        private static void UpdateCoverageFileTarget(string filePath, string coverageFileName)
+        {
+            string sourceCode = File.ReadAllText(filePath);
+
+            if (!ContainsCoverageInstrumentation(sourceCode))
+            {
+                return;
+            }
+
+            var root = CSharpSyntaxTree.ParseText(sourceCode).GetRoot();
+            RewriteCoverageStatements(filePath, root, coverageFileName);
+        }
+
+        private static bool ContainsCoverageInstrumentation(string sourceCode)
+        {
+            return sourceCode.Contains("System.IO.File.AppendAllText", StringComparison.Ordinal);
         }
 
         private static void DeleteCoverageFile(string coverageFileName)
@@ -379,39 +394,91 @@ namespace SBFLApp
         }
 
         /// <summary>
-        /// Utilizes a <see cref="LogStatementRewriter"/> to add instrumentation to the specified method.
+        /// Utilizes a <see cref="LogStatementRewriter"/> to direct instrumentation to the specified coverage file.
         /// </summary>
-        /// <param name="filePath">The path to the file that contains the method to be modified.</param>
-        /// <param name="root">The root <see cref="SyntaxNode"/> that contains the method.</param>
-        /// <param name="methodNode">The <see cref="MethodDeclarationSyntax"/> node to modify.</param>
+        /// <param name="filePath">The path to the file being rewritten.</param>
+        /// <param name="root">The root <see cref="SyntaxNode"/> for the file.</param>
         /// <param name="coverageFileName">The name of the file containing the coverage information.</param>
-        /// <returns>The root <see cref="SyntaxNode"/> that contains the modified method.</returns>
+        /// <returns>The root <see cref="SyntaxNode"/> that contains the modified instrumentation.</returns>
         private static SyntaxNode RewriteCoverageStatements(
             string filePath,
             SyntaxNode root,
-            MethodDeclarationSyntax methodNode,
             string coverageFileName)
         {
             // Create an LogStatementRewriter to modify the method
             var rewriter = new LogStatementRewriter(coverageFileName);
-            var newMethodNode = (MethodDeclarationSyntax)rewriter.Visit(methodNode);
+            var rewrittenRoot = rewriter.Visit(root);
 
-            // If the methods are the same, then just return the root. 
-            if (ReferenceEquals(newMethodNode, methodNode))
+            if (rewrittenRoot == null || SyntaxFactory.AreEquivalent(root, rewrittenRoot))
             {
                 return root;
             }
 
-            // Create a copy of the root with the method replaced by the instrumented method.
-            var updatedRoot = root.ReplaceNode(methodNode, newMethodNode);
-
             // Write the file back to save the changes.
-            File.WriteAllText(filePath, updatedRoot.NormalizeWhitespace().ToFullString());
+            File.WriteAllText(filePath, rewrittenRoot.NormalizeWhitespace().ToFullString());
             Thread.Sleep(1000);
 
             // Reload the code that was just written, and return the new root.
             var reloadedCode = File.ReadAllText(filePath);
             return CSharpSyntaxTree.ParseText(reloadedCode).GetRoot();
+        }
+
+        private static IReadOnlyList<string> DiscoverProductionSourceFiles(string solutionDirectory, string testProjectDirectory)
+        {
+            var files = new List<string>();
+            string solutionRoot = Path.GetFullPath(solutionDirectory);
+            string testProjectRoot = Path.GetFullPath(testProjectDirectory) + Path.DirectorySeparatorChar;
+
+            string toolProjectCandidate = Path.Combine(solutionDirectory, "SBFLApp");
+            string toolProjectRoot = Directory.Exists(toolProjectCandidate)
+                ? Path.GetFullPath(toolProjectCandidate) + Path.DirectorySeparatorChar
+                : string.Empty;
+
+            foreach (var file in Directory.EnumerateFiles(solutionRoot, "*.cs", SearchOption.AllDirectories))
+            {
+                if (ShouldSkipInstrumentation(file, testProjectRoot, toolProjectRoot))
+                {
+                    continue;
+                }
+
+                files.Add(file);
+            }
+
+            return files;
+        }
+
+        private static bool ShouldSkipInstrumentation(string filePath, string testProjectRoot, string toolProjectRoot)
+        {
+            var normalized = Path.GetFullPath(filePath);
+
+            if (!string.IsNullOrEmpty(testProjectRoot) && normalized.StartsWith(testProjectRoot, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            if (!string.IsNullOrEmpty(toolProjectRoot) && normalized.StartsWith(toolProjectRoot, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            if (normalized.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase) ||
+                normalized.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase) ||
+                normalized.Contains($"{Path.DirectorySeparatorChar}coverage{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase) ||
+                normalized.Contains($"{Path.DirectorySeparatorChar}.coverage{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            var fileName = Path.GetFileName(normalized);
+            if (fileName.EndsWith(".g.cs", StringComparison.OrdinalIgnoreCase) ||
+                fileName.EndsWith(".designer.cs", StringComparison.OrdinalIgnoreCase) ||
+                fileName.Equals("AssemblyInfo.cs", StringComparison.OrdinalIgnoreCase) ||
+                fileName.Equals("GlobalUsings.g.cs", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            return false;
         }
 
         private static bool RunTest(string testProjectPath, string fullyQualifiedTestName, bool displayTestOutput = false)
