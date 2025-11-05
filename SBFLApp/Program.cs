@@ -437,40 +437,67 @@ namespace SBFLApp
         private static IReadOnlyList<string> DiscoverProductionSourceFiles(string solutionDirectory, string testProjectDirectory)
         {
             var files = new List<string>();
-            string solutionRoot = Path.GetFullPath(solutionDirectory);
-            string testProjectRoot = Path.GetFullPath(testProjectDirectory) + Path.DirectorySeparatorChar;
+            var projectRoots = DiscoverProductionProjectRoots(solutionDirectory, testProjectDirectory);
 
-            string toolProjectCandidate = Path.Combine(solutionDirectory, "SBFLApp");
-            string toolProjectRoot = Directory.Exists(toolProjectCandidate)
-                ? Path.GetFullPath(toolProjectCandidate) + Path.DirectorySeparatorChar
-                : string.Empty;
-
-            foreach (var file in Directory.EnumerateFiles(solutionRoot, "*.cs", SearchOption.AllDirectories))
+            foreach (var projectRoot in projectRoots)
             {
-                if (ShouldSkipInstrumentation(file, testProjectRoot, toolProjectRoot))
+                foreach (var file in Directory.EnumerateFiles(projectRoot, "*.cs", SearchOption.AllDirectories))
                 {
-                    continue;
-                }
+                    if (ShouldSkipProjectFile(file))
+                    {
+                        continue;
+                    }
 
-                files.Add(file);
+                    files.Add(file);
+                }
             }
 
             return files;
         }
 
-        private static bool ShouldSkipInstrumentation(string filePath, string testProjectRoot, string toolProjectRoot)
+        private static IReadOnlyCollection<string> DiscoverProductionProjectRoots(string solutionDirectory, string testProjectDirectory)
+        {
+            string solutionRoot = Path.GetFullPath(solutionDirectory);
+            string testProjectRoot = EnsureTrailingSeparator(Path.GetFullPath(testProjectDirectory));
+
+            string toolProjectCandidate = Path.Combine(solutionDirectory, "SBFLApp");
+            string toolProjectRoot = Directory.Exists(toolProjectCandidate)
+                ? EnsureTrailingSeparator(Path.GetFullPath(toolProjectCandidate))
+                : string.Empty;
+
+            var projectRoots = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var projectPath in Directory.EnumerateFiles(solutionRoot, "*.csproj", SearchOption.AllDirectories))
+            {
+                string normalizedProjectPath = Path.GetFullPath(projectPath);
+                string? projectDirectory = Path.GetDirectoryName(normalizedProjectPath);
+
+                if (string.IsNullOrEmpty(projectDirectory))
+                {
+                    continue;
+                }
+
+                string normalizedProjectDirectory = EnsureTrailingSeparator(projectDirectory);
+
+                if (!string.IsNullOrEmpty(testProjectRoot) && normalizedProjectDirectory.StartsWith(testProjectRoot, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                if (!string.IsNullOrEmpty(toolProjectRoot) && normalizedProjectDirectory.StartsWith(toolProjectRoot, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                projectRoots.Add(normalizedProjectDirectory);
+            }
+
+            return projectRoots;
+        }
+
+        private static bool ShouldSkipProjectFile(string filePath)
         {
             var normalized = Path.GetFullPath(filePath);
-
-            if (!string.IsNullOrEmpty(testProjectRoot) && normalized.StartsWith(testProjectRoot, StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
-
-            if (!string.IsNullOrEmpty(toolProjectRoot) && normalized.StartsWith(toolProjectRoot, StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
 
             if (normalized.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase) ||
                 normalized.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase) ||
@@ -492,7 +519,21 @@ namespace SBFLApp
             return false;
         }
 
-        private static bool RunTest(string testProjectPath, string fullyQualifiedTestName, bool verbose = false)
+        private static string EnsureTrailingSeparator(string path)
+        {
+            if (string.IsNullOrEmpty(path))
+            {
+                return path;
+            }
+
+            string separator = Path.DirectorySeparatorChar.ToString();
+
+            return path.EndsWith(separator, StringComparison.Ordinal)
+                ? path
+                : path + separator;
+        }
+
+        private static bool RunTest(string testProjectPath, string fullyQualifiedTestName, bool displayTestOutput = false)
         {
             try
             {
