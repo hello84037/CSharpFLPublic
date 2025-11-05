@@ -11,17 +11,18 @@ namespace SBFLApp
         {
             LogMessage("Running the Spectrum Based Fault Localizer Application\n");
 
-            if (args.Length < 2)
+            if (args.Length < 5)
             {
-                LogWarning("Usage: dotnet run <solutionDirectory> <testProjectName> [--reset (-r)] [--verbose (-v)]");
+                LogWarning("Usage: dotnet run <solutionDirectory> <testProjectName> <projectUnderTestName> <resetFlag> <verboseFlag>");
                 return;
             }
 
             // Parse the given commandline arguments.
             string solutionDirectory = args[0];
             string testProjectName = args[1];
-            bool resetRequested = args.Any(arg => string.Equals(arg, "--reset", StringComparison.OrdinalIgnoreCase) || string.Equals(arg, "-r", StringComparison.OrdinalIgnoreCase));
-            bool verboseRequested = args.Any(arg => string.Equals(arg, "--verbose", StringComparison.OrdinalIgnoreCase) || string.Equals(arg, "-v", StringComparison.OrdinalIgnoreCase));
+            string projectUnderTestName = args[2];
+            bool resetRequested = ParseBooleanFlag(args[3], expectedName: "reset flag");
+            bool verboseRequested = ParseBooleanFlag(args[4], expectedName: "verbose flag");
 
             // Verify the solution directory to be tested exists.
             if (!Directory.Exists(solutionDirectory))
@@ -35,6 +36,13 @@ namespace SBFLApp
             if (!Directory.Exists(testProjectDirectory))
             {
                 LogError($"Test project directory not found: {testProjectDirectory}");
+                return;
+            }
+
+            string projectUnderTestDirectory = Path.Combine(solutionDirectory, projectUnderTestName);
+            if (!Directory.Exists(projectUnderTestDirectory))
+            {
+                LogError($"Project under test directory not found: {projectUnderTestDirectory}");
                 return;
             }
 
@@ -70,7 +78,7 @@ namespace SBFLApp
                 Console.WriteLine($" - {test.FullyQualifiedName}");
             }
 
-            var productionSourceFiles = DiscoverProductionSourceFiles(solutionDirectory, testProjectDirectory);
+            var productionSourceFiles = DiscoverProductionSourceFiles(projectUnderTestDirectory);
 
             if (productionSourceFiles.Count == 0)
             {
@@ -79,7 +87,7 @@ namespace SBFLApp
 
             // Create a dictionary for storing the test and the pass/fail status
             var testPassFail = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
-            SetInjection(productionSourceFiles, discoveredTests, testProjectPath, ref testPassFail);
+            SetInjection(productionSourceFiles, discoveredTests, testProjectPath, ref testPassFail, verboseRequested);
 
             var testCoverage = BuildTestCoverage(
                 discoveredTests,
@@ -317,7 +325,7 @@ namespace SBFLApp
                 }
 
                 // Run the test silently
-                bool passed = RunTest(testProjectPath, test.FullyQualifiedName);
+                bool passed = RunTest(testProjectPath, test.FullyQualifiedName, verbose);
                 testPassFail[test.CoverageFileStem] = passed;
             }
         }
@@ -434,65 +442,26 @@ namespace SBFLApp
             return CSharpSyntaxTree.ParseText(reloadedCode).GetRoot();
         }
 
-        private static IReadOnlyList<string> DiscoverProductionSourceFiles(string solutionDirectory, string testProjectDirectory)
+        private static IReadOnlyList<string> DiscoverProductionSourceFiles(string projectUnderTestDirectory)
         {
             var files = new List<string>();
-            var projectRoots = DiscoverProductionProjectRoots(solutionDirectory, testProjectDirectory);
 
-            foreach (var projectRoot in projectRoots)
+            if (!Directory.Exists(projectUnderTestDirectory))
             {
-                foreach (var file in Directory.EnumerateFiles(projectRoot, "*.cs", SearchOption.AllDirectories))
-                {
-                    if (ShouldSkipProjectFile(file))
-                    {
-                        continue;
-                    }
+                return files;
+            }
 
-                    files.Add(file);
+            foreach (var file in Directory.EnumerateFiles(projectUnderTestDirectory, "*.cs", SearchOption.AllDirectories))
+            {
+                if (ShouldSkipProjectFile(file))
+                {
+                    continue;
                 }
+
+                files.Add(file);
             }
 
             return files;
-        }
-
-        private static IReadOnlyCollection<string> DiscoverProductionProjectRoots(string solutionDirectory, string testProjectDirectory)
-        {
-            string solutionRoot = Path.GetFullPath(solutionDirectory);
-            string testProjectRoot = EnsureTrailingSeparator(Path.GetFullPath(testProjectDirectory));
-
-            string toolProjectCandidate = Path.Combine(solutionDirectory, "SBFLApp");
-            string toolProjectRoot = Directory.Exists(toolProjectCandidate)
-                ? EnsureTrailingSeparator(Path.GetFullPath(toolProjectCandidate))
-                : string.Empty;
-
-            var projectRoots = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-            foreach (var projectPath in Directory.EnumerateFiles(solutionRoot, "*.csproj", SearchOption.AllDirectories))
-            {
-                string normalizedProjectPath = Path.GetFullPath(projectPath);
-                string? projectDirectory = Path.GetDirectoryName(normalizedProjectPath);
-
-                if (string.IsNullOrEmpty(projectDirectory))
-                {
-                    continue;
-                }
-
-                string normalizedProjectDirectory = EnsureTrailingSeparator(projectDirectory);
-
-                if (!string.IsNullOrEmpty(testProjectRoot) && normalizedProjectDirectory.StartsWith(testProjectRoot, StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
-
-                if (!string.IsNullOrEmpty(toolProjectRoot) && normalizedProjectDirectory.StartsWith(toolProjectRoot, StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
-
-                projectRoots.Add(normalizedProjectDirectory);
-            }
-
-            return projectRoots;
         }
 
         private static bool ShouldSkipProjectFile(string filePath)
@@ -519,18 +488,42 @@ namespace SBFLApp
             return false;
         }
 
-        private static string EnsureTrailingSeparator(string path)
+        private static bool ParseBooleanFlag(string value, string expectedName)
         {
-            if (string.IsNullOrEmpty(path))
+            if (string.IsNullOrWhiteSpace(value))
             {
-                return path;
+                return false;
             }
 
-            string separator = Path.DirectorySeparatorChar.ToString();
+            if (bool.TryParse(value, out bool parsed))
+            {
+                return parsed;
+            }
 
-            return path.EndsWith(separator, StringComparison.Ordinal)
-                ? path
-                : path + separator;
+            if (string.Equals(value, "1", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            if (string.Equals(value, "0", StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            if (string.Equals(expectedName, "reset flag", StringComparison.OrdinalIgnoreCase) &&
+                (string.Equals(value, "--reset", StringComparison.OrdinalIgnoreCase) || string.Equals(value, "-r", StringComparison.OrdinalIgnoreCase)))
+            {
+                return true;
+            }
+
+            if (string.Equals(expectedName, "verbose flag", StringComparison.OrdinalIgnoreCase) &&
+                (string.Equals(value, "--verbose", StringComparison.OrdinalIgnoreCase) || string.Equals(value, "-v", StringComparison.OrdinalIgnoreCase)))
+            {
+                return true;
+            }
+
+            LogWarning($"Unrecognized value '{value}' for {expectedName}. Defaulting to 'false'.");
+            return false;
         }
 
         private static bool RunTest(string testProjectPath, string fullyQualifiedTestName, bool verbose = false)
