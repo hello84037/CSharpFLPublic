@@ -533,7 +533,7 @@ namespace SBFLApp
                 : path + separator;
         }
 
-        private static bool RunTest(string testProjectPath, string fullyQualifiedTestName, bool displayTestOutput = false)
+        private static bool RunTest(string testProjectPath, string fullyQualifiedTestName, bool verbose = false)
         {
             try
             {
