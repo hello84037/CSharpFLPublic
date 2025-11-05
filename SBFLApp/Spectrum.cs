@@ -7,15 +7,24 @@ namespace SBFLApp
 {
     internal class Spectrum
     {
-
-
-        // Inject coverage logging into a specific method in a file
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <param name="filePath"></param>
+        /// <param name="methodName"></param>
+        /// <param name="coverageFileName"></param>
         public static void SpectrumMethod(string filePath, string methodName, string? coverageFileName = null)
         {
+            // Read in the source code that contains the method.
             var sourceCode = File.ReadAllText(filePath);
+            
+            // Create an abstract syntax tree representation of the source code.
             var tree = CSharpSyntaxTree.ParseText(sourceCode);
             var root = tree.GetRoot();
-            var method = root.DescendantNodes().OfType<MethodDeclarationSyntax>().FirstOrDefault(m => m.Identifier.Text == methodName);
+
+            // Search for the method to modify.
+            var method = SyntaxTreeHelpers.FindMethod(root, methodName);
+
             if (method == null)
             {
                 Console.WriteLine($"Method '{methodName}' not found.");

@@ -9,11 +9,20 @@ namespace SBFLApp
     {
         private readonly string _coverageFileName;
 
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <param name="coverageFileName"></param>
         public LogStatementRewriter(string coverageFileName)
         {
             _coverageFileName = coverageFileName;
         }
 
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <param name="node"></param>
+        /// <returns></returns>
         public override SyntaxNode VisitInvocationExpression(InvocationExpressionSyntax node)
         {
             if (!IsCoverageLogInvocation(node))
@@ -56,6 +65,11 @@ namespace SBFLApp
             return node.WithArgumentList(updatedArgumentList);
         }
 
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <param name="node"></param>
+        /// <returns></returns>
         private static bool IsCoverageLogInvocation(InvocationExpressionSyntax node)
         {
             if (node.Expression is not MemberAccessExpressionSyntax memberAccess)
@@ -67,6 +81,12 @@ namespace SBFLApp
             return target == "System.IO.File.AppendAllText";
         }
 
+
+        /// <summary>
+        /// Checks to see if the given expression contains "Environment.NewLine"
+        /// </summary>
+        /// <param name="expression">The expression to search.</param>
+        /// <returns>True if the expression contains "Environment.NewLine" and false otherwise.</returns>
         private static bool ContainsEnvironmentNewLine(ExpressionSyntax expression)
         {
             return expression.ToString().Contains("Environment.NewLine", StringComparison.Ordinal);
