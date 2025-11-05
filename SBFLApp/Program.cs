@@ -13,7 +13,7 @@ namespace SBFLApp
 
             if (args.Length < 2)
             {
-                LogWarning("Usage: dotnet run <solutionDirectory> <testProjectName> [--reset]");
+                LogWarning("Usage: dotnet run <solutionDirectory> <testProjectName> [--reset (-r)] [--verbose (-v)]");
                 return;
             }
 
@@ -21,6 +21,7 @@ namespace SBFLApp
             string solutionDirectory = args[0];
             string testProjectName = args[1];
             bool resetRequested = args.Any(arg => string.Equals(arg, "--reset", StringComparison.OrdinalIgnoreCase) || string.Equals(arg, "-r", StringComparison.OrdinalIgnoreCase));
+            bool verboseRequested = args.Any(arg => string.Equals(arg, "--verbose", StringComparison.OrdinalIgnoreCase) || string.Equals(arg, "-v", StringComparison.OrdinalIgnoreCase));
 
             // Verify the solution directory to be tested exists.
             if (!Directory.Exists(solutionDirectory))
@@ -73,6 +74,7 @@ namespace SBFLApp
             var testPassFail = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
             foreach (var group in discoveredTests.GroupBy(test => test.FilePath, StringComparer.OrdinalIgnoreCase))
             {
+                // Make sure coverage data has been written then run the tests.
                 SetInjection(group.Key, group.ToList(), testProjectPath, ref testPassFail);
             }
 
@@ -152,6 +154,13 @@ namespace SBFLApp
                 .ToList();
         }
 
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <param name="tests"></param>
+        /// <param name="solutionDirectory"></param>
+        /// <param name="testProjectDirectory"></param>
+        /// <returns></returns>
         private static Dictionary<string, ISet<string>> BuildTestCoverage(
             IEnumerable<DiscoveredTest> tests,
             string solutionDirectory,
@@ -159,6 +168,7 @@ namespace SBFLApp
         {
             var coverage = new Dictionary<string, ISet<string>>(StringComparer.OrdinalIgnoreCase);
 
+            // List the directories to look for coverage data.
             var candidateRoots = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
             {
                 Directory.GetCurrentDirectory(),
@@ -279,12 +289,14 @@ namespace SBFLApp
         /// <param name="filePath">The path to the test file.</param>
         /// <param name="tests">The <see cref="DiscoveredTest"/> objects associated with the file.</param>
         /// <param name="testProjectPath">The path to the test csproj file.</param>
+        /// <param name="verbose">If verbose is requested, the test output will be displayed.</param>
         /// <param name="testPassFail">A dictionary to store the test and test result.</param>
         private static void SetInjection(
             in string filePath,
             in IReadOnlyList<DiscoveredTest> tests,
             in string testProjectPath,
-            ref Dictionary<string, bool> testPassFail)
+            ref Dictionary<string, bool> testPassFail,
+            in bool verbose = false)
         {
             LogMessage("Injection and testing in progress...");
 
@@ -318,6 +330,7 @@ namespace SBFLApp
                 }
 
                 // Check the method for existing instrumentation.
+                // TODO, is there a better way to check for instrumentation?
                 bool alreadyInstrumented = methodNode.DescendantNodes()
                     .OfType<ExpressionStatementSyntax>()
                     .Any(stmt => stmt.ToString().Contains("System.IO.File.AppendAllText"));
@@ -326,28 +339,19 @@ namespace SBFLApp
                 string coverageFileName = $"{test.CoverageFileStem}.coverage";
                 DeleteCoverageFile(coverageFileName);
 
-                //If the files were already instrumented, we are going to update them to make sure they are correct. 
+                //If the files were already instrumented, make sure they have the correct coverage file name. 
                 if (alreadyInstrumented)
                 {
                     updatedRoot = RewriteCoverageStatements(filePath, updatedRoot, methodNode, coverageFileName);
                 }
                 else
                 {
+                    // Add coverage statements to the method.
                     Spectrum.SpectrumMethod(filePath, test.MethodName, coverageFileName);
-
-                    string reloadedCode = File.ReadAllText(filePath);
-                    updatedRoot = CSharpSyntaxTree.ParseText(reloadedCode).GetRoot();
-
-                    var reloadedMethod = SyntaxTreeHelpers.FindMethod(updatedRoot, test.MethodName, test.TypeDisplayName);
-
-                    if (reloadedMethod != null)
-                    {
-                        updatedRoot = RewriteCoverageStatements(filePath, updatedRoot, reloadedMethod, coverageFileName);
-                    }
                 }
 
                 // Run the test silently
-                bool passed = RunTest(testProjectPath, test.FullyQualifiedName);
+                bool passed = RunTest(testProjectPath, test.FullyQualifiedName, verbose);
                 testPassFail[test.CoverageFileStem] = passed;
             }
         }
@@ -414,7 +418,14 @@ namespace SBFLApp
             return CSharpSyntaxTree.ParseText(reloadedCode).GetRoot();
         }
 
-        private static bool RunTest(string testProjectPath, string fullyQualifiedTestName, bool displayTestOutput = false)
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <param name="testProjectPath"></param>
+        /// <param name="fullyQualifiedTestName"></param>
+        /// <param name="displayTestOutput"></param>
+        /// <returns></returns>
+        private static bool RunTest(string testProjectPath, string fullyQualifiedTestName, bool verbose = false)
         {
             try
             {
@@ -446,7 +457,8 @@ namespace SBFLApp
                     return false;
                 }
 
-                if (displayTestOutput)
+                // Show the test output if the user desires it.
+                if (verbose)
                 {
                     string output = process.StandardOutput.ReadToEnd();
                     string error = process.StandardError.ReadToEnd();

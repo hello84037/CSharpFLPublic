@@ -18,7 +18,7 @@ namespace SBFLApp
         /// <param name="methodName">The method name to search for.</param>
         /// <param name="typeDisplayName">The type display name to search for.</param>
         /// <returns><see cref="MethodDeclarationSyntax"/> if one is found, or null if no method is found.</returns>
-        public static MethodDeclarationSyntax? FindMethod(SyntaxNode root, string methodName = "", string typeDisplayName = "")
+        public static MethodDeclarationSyntax? FindMethod(SyntaxNode root, string methodName, string typeDisplayName)
         {
             return root
                 .DescendantNodes()
@@ -26,6 +26,22 @@ namespace SBFLApp
                 .FirstOrDefault(method =>
                     string.Equals(method.Identifier.Text, methodName, StringComparison.Ordinal) &&
                     string.Equals(GetTypeDisplayName(method), typeDisplayName, StringComparison.Ordinal));
+        }
+
+        /// <summary>
+        /// Look through the decendents of the root <see cref="SyntaxNode"/> for the node specified
+        /// by the test parameter.
+        /// </summary>
+        /// <param name="root">The <see cref="SyntaxNode"/> to search.</param>
+        /// <param name="methodName">The method name to search for.</param>
+        /// <returns><see cref="MethodDeclarationSyntax"/> if one is found, or null if no method is found.</returns>
+        public static MethodDeclarationSyntax? FindMethod(SyntaxNode root, string methodName = "")
+        {
+            return root
+                .DescendantNodes()
+                .OfType<MethodDeclarationSyntax>()
+                .FirstOrDefault(method =>
+                    string.Equals(method.Identifier.Text, methodName, StringComparison.Ordinal));
         }
 
         /// <summary>
