@@ -9,11 +9,11 @@ namespace SBFLApp
     {
         static void Main(string[] args)
         {
-            LogMessage("Running the Spetrum Based Fault Localizer Application\n");
+            LogMessage("Running the Spectrum Based Fault Localizer Application\n");
 
             if (args.Length < 2)
             {
-                LogWarning("Usage: dotnet run <solutionDirectory> <testProjectName> [--reset]");
+                LogWarning("Usage: dotnet run <solutionDirectory> <testProjectName> [--reset (-r)] [--verbose (-v)]");
                 return;
             }
 
@@ -21,6 +21,7 @@ namespace SBFLApp
             string solutionDirectory = args[0];
             string testProjectName = args[1];
             bool resetRequested = args.Any(arg => string.Equals(arg, "--reset", StringComparison.OrdinalIgnoreCase) || string.Equals(arg, "-r", StringComparison.OrdinalIgnoreCase));
+            bool verboseRequested = args.Any(arg => string.Equals(arg, "--verbose", StringComparison.OrdinalIgnoreCase) || string.Equals(arg, "-v", StringComparison.OrdinalIgnoreCase));
 
             // Verify the solution directory to be tested exists.
             if (!Directory.Exists(solutionDirectory))
@@ -156,6 +157,13 @@ namespace SBFLApp
                 .ToList();
         }
 
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <param name="tests"></param>
+        /// <param name="solutionDirectory"></param>
+        /// <param name="testProjectDirectory"></param>
+        /// <returns></returns>
         private static Dictionary<string, ISet<string>> BuildTestCoverage(
             IEnumerable<DiscoveredTest> tests,
             string solutionDirectory,
@@ -163,6 +171,7 @@ namespace SBFLApp
         {
             var coverage = new Dictionary<string, ISet<string>>(StringComparer.OrdinalIgnoreCase);
 
+            // List the directories to look for coverage data.
             var candidateRoots = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
             {
                 Directory.GetCurrentDirectory(),
@@ -283,12 +292,14 @@ namespace SBFLApp
         /// <param name="sourceFiles">The production source files targeted for instrumentation.</param>
         /// <param name="tests">The <see cref="DiscoveredTest"/> instances to execute.</param>
         /// <param name="testProjectPath">The path to the test csproj file.</param>
+        /// <param name="verbose">If verbose is requested, the test output will be displayed.</param>
         /// <param name="testPassFail">A dictionary to store the test and test result.</param>
         private static void SetInjection(
             in IReadOnlyList<string> sourceFiles,
             in IReadOnlyList<DiscoveredTest> tests,
             in string testProjectPath,
-            ref Dictionary<string, bool> testPassFail)
+            ref Dictionary<string, bool> testPassFail,
+            in bool verbose = false)
         {
             LogMessage("Injection and testing in progress...");
 
@@ -513,7 +524,8 @@ namespace SBFLApp
                     return false;
                 }
 
-                if (displayTestOutput)
+                // Show the test output if the user desires it.
+                if (verbose)
                 {
                     string output = process.StandardOutput.ReadToEnd();
                     string error = process.StandardError.ReadToEnd();
