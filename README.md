@@ -3,8 +3,8 @@
 CSharpFL is a sample C# solution that demonstrates automated spectrum-based fault localization (SBFL). The `SBFLApp` console utility instruments the unit tests, executes them, collects coverage data, and ranks potentially faulty statements with several well-known SBFL metrics.
 
 ## Repository layout
-- **MathApp/** – Minimal console application used as the subject under test. `MathOperations.cs` contains the arithmetic routines exercised by the tests.
-- **MathApp.Tests/** – xUnit test project with addition and subtraction scenarios. Some subtraction tests intentionally fail so that the fault-localization workflow has both passing and failing executions to analyze.
+- **MathApp/** – Minimal console application used as the subject under test. `MathOperations.cs` contains the arithmetic routines exercised by the tests, and `SeriesOperations.cs` provides richer sequence and statistics helpers for multi-file experimentation.
+- **MathApp.Tests/** – xUnit test project with addition, subtraction, and series-analysis scenarios. Some subtraction tests intentionally fail so that the fault-localization workflow has both passing and failing executions to analyze.
 - **SBFLApp/** – Console application that performs the SBFL workflow.
   - `Program.cs` discovers test methods, injects instrumentation, runs the filtered tests, and writes coverage identifiers to disk.
   - `Spectrum.cs` and `LogStatementRewriter.cs` contain the Roslyn rewriters that add and clean up logging statements.
@@ -52,7 +52,7 @@ dotnet test
 The subtraction scenarios are expected to fail—they provide failing executions for the SBFL ranking.
 
 ## Extending the sample
-- Add new methods to `MathOperations` along with failing unit tests to explore how rankings shift when more complex bugs are introduced.
+- Introduce additional scenarios in `SeriesOperations` (or new helper classes) plus focused unit tests to explore how rankings shift when more complex bugs are introduced across multiple files.
 - Experiment with additional spectrum-based metrics by following the patterns in `Rank.cs`.
 - Integrate the ranking results with visualization tools or IDE extensions to aid debugging workflows.
 
