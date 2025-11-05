@@ -10,7 +10,7 @@ namespace SBFLApp
 
 
         // Inject coverage logging into a specific method in a file
-        public static void SpectrumMethod(string filePath, string methodName)
+        public static void SpectrumMethod(string filePath, string methodName, string? coverageFileName = null)
         {
             var sourceCode = File.ReadAllText(filePath);
             var tree = CSharpSyntaxTree.ParseText(sourceCode);
@@ -21,7 +21,7 @@ namespace SBFLApp
                 Console.WriteLine($"Method '{methodName}' not found.");
                 return;
             }
-            var rewriter = new CoverageInjector(methodName, null, null, filePath);
+            var rewriter = new CoverageInjector(methodName, coverageFileName, null, filePath);
             if (rewriter.Visit(root) is not CompilationUnitSyntax rewrittenRoot)
             {
                 Console.WriteLine($"Failed to rewrite method '{methodName}' in '{filePath}'.");
@@ -69,7 +69,7 @@ namespace SBFLApp
             Directory.CreateDirectory(coverageFolder);
             var coverageFilePath = Path.Combine(coverageFolder, $"{testName}.coverage");
 
-            var rewriter = new CoverageInjector(null, testName, guidCollector, filePath);
+            var rewriter = new CoverageInjector(null, coverageFilePath, guidCollector, filePath);
             var newRoot = rewriter.Visit(root);
 
             File.WriteAllText(filePath, newRoot.NormalizeWhitespace().ToFullString());
@@ -296,17 +296,17 @@ namespace SBFLApp
         private class CoverageInjector : CSharpSyntaxRewriter
         {
             private readonly string? _targetMethodName;
-            private readonly string? _testName;
+            private readonly string? _coverageFileName;
             private readonly List<string>? _guidCollector;
             private readonly string? _sourceFilePath;
             private readonly Stack<string> _namespaceStack = new();
             private readonly Stack<string> _typeStack = new();
             private string _currentMethodName = "";
 
-            public CoverageInjector(string? methodName = null, string? testName = null, List<string>? guidCollector = null, string? sourceFilePath = null)
+            public CoverageInjector(string? methodName = null, string? coverageFileName = null, List<string>? guidCollector = null, string? sourceFilePath = null)
             {
                 _targetMethodName = methodName;
-                _testName = testName;
+                _coverageFileName = coverageFileName;
                 _guidCollector = guidCollector;
                 _sourceFilePath = sourceFilePath;
             }
@@ -369,10 +369,10 @@ namespace SBFLApp
                     }
 
                     var guid = Guid.NewGuid().ToString();
-                    var coverageFilePath = _testName ?? $"{_currentMethodName}.coverage";
+                    var coverageFilePath = _coverageFileName ?? $"{_currentMethodName}.coverage";
 
                     var logStatement = SyntaxFactory.ParseStatement(
-                        $"System.IO.File.AppendAllText(\"{coverageFilePath}\", \"{guid}\");"
+                        $"System.IO.File.AppendAllText(\"{EscapeString(coverageFilePath)}\", \"{guid}\" + System.Environment.NewLine);"
                     );
 
                     _guidCollector?.Add(guid);
@@ -408,6 +408,13 @@ namespace SBFLApp
                     : string.Empty;
 
                 return $"{namespacePrefix}{typePrefix}{_currentMethodName}";
+            }
+
+            private static string EscapeString(string value)
+            {
+                return value
+                    .Replace("\\", "\\\\")
+                    .Replace("\"", "\\\"");
             }
 
 

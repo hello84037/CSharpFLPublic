@@ -253,7 +253,6 @@ namespace SBFLApp
             var root = syntaxTree.GetRoot();
 
             var updatedRoot = root;
-            var rootDirty = false;
 
             foreach (var test in tests)
             {
@@ -271,19 +270,16 @@ namespace SBFLApp
                     .OfType<ExpressionStatementSyntax>()
                     .Any(stmt => stmt.ToString().Contains("System.IO.File.AppendAllText"));
 
-                string newGuid = Guid.NewGuid().ToString();
-                string logStatement = $"System.IO.File.AppendAllText(\"{test.CoverageFileStem}.coverage\", \"{newGuid}\");";
+                string coverageFileName = $"{test.CoverageFileStem}.coverage";
+                DeleteCoverageFile(coverageFileName);
 
                 if (alreadyInstrumented)
                 {
-                    var rewriter = new LogStatementRewriter(logStatement);
-                    var newMethodNode = (MethodDeclarationSyntax)rewriter.Visit(methodNode);
-                    updatedRoot = updatedRoot.ReplaceNode(methodNode, newMethodNode);
-                    rootDirty = true;
+                    updatedRoot = RewriteCoverageStatements(filePath, updatedRoot, methodNode, coverageFileName);
                 }
                 else
                 {
-                    Spectrum.SpectrumMethod(filePath, test.MethodName);
+                    Spectrum.SpectrumMethod(filePath, test.MethodName, coverageFileName);
 
                     string reloadedCode = File.ReadAllText(filePath);
                     updatedRoot = CSharpSyntaxTree.ParseText(reloadedCode).GetRoot();
@@ -292,28 +288,62 @@ namespace SBFLApp
 
                     if (reloadedMethod != null)
                     {
-                        var rewriter = new LogStatementRewriter(logStatement);
-                        var newMethodNode = (MethodDeclarationSyntax)rewriter.Visit(reloadedMethod);
-                        updatedRoot = updatedRoot.ReplaceNode(reloadedMethod, newMethodNode);
-                        rootDirty = true;
+                        updatedRoot = RewriteCoverageStatements(filePath, updatedRoot, reloadedMethod, coverageFileName);
                     }
                 }
-
-                if (rootDirty)
-                {
-                    File.WriteAllText(filePath, updatedRoot.NormalizeWhitespace().ToFullString());
-                    Thread.Sleep(1000);
-                    rootDirty = false;
-                }
-
-                string binPath = AppDomain.CurrentDomain.BaseDirectory;
-                string coveragePath = Path.Combine(binPath, $"{test.CoverageFileStem}.coverage");
-                File.AppendAllText(coveragePath, newGuid + Environment.NewLine);
 
                 // Run the test silently
                 bool passed = RunTest(testProjectPath, test.FullyQualifiedName);
                 testPassFail[test.CoverageFileStem] = passed;
             }
+        }
+
+        private static void DeleteCoverageFile(string coverageFileName)
+        {
+            try
+            {
+                if (File.Exists(coverageFileName))
+                {
+                    File.Delete(coverageFileName);
+                }
+
+                var binPath = AppDomain.CurrentDomain.BaseDirectory;
+                var fullPath = Path.Combine(binPath, coverageFileName);
+                if (File.Exists(fullPath))
+                {
+                    File.Delete(fullPath);
+                }
+            }
+            catch (IOException ex)
+            {
+                Console.WriteLine($"Failed to delete coverage file '{coverageFileName}': {ex.Message}");
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                Console.WriteLine($"Failed to delete coverage file '{coverageFileName}': {ex.Message}");
+            }
+        }
+
+        private static SyntaxNode RewriteCoverageStatements(
+            string filePath,
+            SyntaxNode root,
+            MethodDeclarationSyntax methodNode,
+            string coverageFileName)
+        {
+            var rewriter = new LogStatementRewriter(coverageFileName);
+            var newMethodNode = (MethodDeclarationSyntax)rewriter.Visit(methodNode);
+
+            if (ReferenceEquals(newMethodNode, methodNode))
+            {
+                return root;
+            }
+
+            var updatedRoot = root.ReplaceNode(methodNode, newMethodNode);
+            File.WriteAllText(filePath, updatedRoot.NormalizeWhitespace().ToFullString());
+            Thread.Sleep(1000);
+
+            var reloadedCode = File.ReadAllText(filePath);
+            return CSharpSyntaxTree.ParseText(reloadedCode).GetRoot();
         }
 
         private static bool RunTest(string testProjectPath, string fullyQualifiedTestName, bool displayTestOutput = false)
