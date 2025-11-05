@@ -8,11 +8,13 @@ namespace SBFLApp
     internal class Spectrum
     {
         /// <summary>
-        /// 
+        /// Reads the source into a syntax tree representation.  Searches for the method to modify.
+        /// If the method is located, then coverage data is written to each statement in the method.
+        /// The source file is re-written using the modified syntax tree representation.
         /// </summary>
-        /// <param name="filePath"></param>
-        /// <param name="methodName"></param>
-        /// <param name="coverageFileName"></param>
+        /// <param name="filePath">The path to the file to be modified.</param>
+        /// <param name="methodName">The name of the method to modify.</param>
+        /// <param name="coverageFileName">The name of the coverage file to use in the modified statement.</param>
         public static void SpectrumMethod(string filePath, string methodName, string? coverageFileName = null)
         {
             // Read in the source code that contains the method.
@@ -25,11 +27,14 @@ namespace SBFLApp
             // Search for the method to modify.
             var method = SyntaxTreeHelpers.FindMethod(root, methodName);
 
+            // Method wasn't found, return;
             if (method == null)
             {
                 Console.WriteLine($"Method '{methodName}' not found.");
                 return;
             }
+
+            // Inject the coverage statements into the method.
             var rewriter = new CoverageInjector(methodName, coverageFileName, null, filePath);
             if (rewriter.Visit(root) is not CompilationUnitSyntax rewrittenRoot)
             {
@@ -37,6 +42,7 @@ namespace SBFLApp
                 return;
             }
 
+            // Get the method from the rewritten/modified root.
             var updatedMethod = rewrittenRoot
                 .DescendantNodes()
                 .OfType<MethodDeclarationSyntax>()
@@ -48,12 +54,16 @@ namespace SBFLApp
                 return;
             }
 
+            // Write the modified file back to the file system.
             var newRoot = rewrittenRoot;
             File.WriteAllText(filePath, newRoot.NormalizeWhitespace().ToFullString());
             Console.WriteLine($"Injected logging into all statements in '{methodName}' in '{filePath}'.");
         }
 
-        // Inject coverage logging into all methods within the specified file
+        /// <summary>
+        /// Inject coverage logging into all methods within the specified file.
+        /// </summary>
+        /// <param name="filePath"></param>
         public static void SpectrumAll(string filePath)
         {
             var sourceCode = File.ReadAllText(filePath);
@@ -301,134 +311,6 @@ namespace SBFLApp
             return Regex.IsMatch(name, @"TestMethod|Fact|Test", RegexOptions.IgnoreCase);
         }
 
-        // Rewrites C# syntax tree nodes to inject coverage logging statements
-        private class CoverageInjector : CSharpSyntaxRewriter
-        {
-            private readonly string? _targetMethodName;
-            private readonly string? _coverageFileName;
-            private readonly List<string>? _guidCollector;
-            private readonly string? _sourceFilePath;
-            private readonly Stack<string> _namespaceStack = new();
-            private readonly Stack<string> _typeStack = new();
-            private string _currentMethodName = "";
-
-            public CoverageInjector(string? methodName = null, string? coverageFileName = null, List<string>? guidCollector = null, string? sourceFilePath = null)
-            {
-                _targetMethodName = methodName;
-                _coverageFileName = coverageFileName;
-                _guidCollector = guidCollector;
-                _sourceFilePath = sourceFilePath;
-            }
-
-            public override SyntaxNode VisitNamespaceDeclaration(NamespaceDeclarationSyntax node)
-            {
-                _namespaceStack.Push(node.Name.ToString());
-                var result = base.VisitNamespaceDeclaration(node);
-                _namespaceStack.Pop();
-                return result ?? node;
-            }
-
-            public override SyntaxNode VisitFileScopedNamespaceDeclaration(FileScopedNamespaceDeclarationSyntax node)
-            {
-                _namespaceStack.Push(node.Name.ToString());
-                var result = base.VisitFileScopedNamespaceDeclaration(node);
-                _namespaceStack.Pop();
-                return result ?? node;
-            }
-
-            public override SyntaxNode VisitClassDeclaration(ClassDeclarationSyntax node)
-            {
-                _typeStack.Push(node.Identifier.Text);
-                var result = base.VisitClassDeclaration(node);
-                _typeStack.Pop();
-                return result ?? node;
-            }
-
-            public override SyntaxNode VisitStructDeclaration(StructDeclarationSyntax node)
-            {
-                _typeStack.Push(node.Identifier.Text);
-                var result = base.VisitStructDeclaration(node);
-                _typeStack.Pop();
-                return result ?? node;
-            }
-
-            // Visit method declarations, process only the target method if specified
-            public override SyntaxNode VisitMethodDeclaration(MethodDeclarationSyntax node)
-            {
-                if (_targetMethodName != null && node.Identifier.Text != _targetMethodName)
-                    return node;
-
-                _currentMethodName = node.Identifier.Text;
-                return base.VisitMethodDeclaration(node) ?? node;
-            }
-
-            // Visit blocks and inject logging statements before each original statement
-            public override SyntaxNode VisitBlock(BlockSyntax node)
-            {
-                var newStatements = new List<StatementSyntax>();
-
-                foreach (var statement in node.Statements)
-                {
-                    // Skip instrumentation if this statement is already a logging statement
-                    var statementText = statement.ToString();
-                    if (statementText.Contains("System.IO.File.AppendAllText"))
-                    {
-                        newStatements.Add(statement);
-                        continue;
-                    }
-
-                    var guid = Guid.NewGuid().ToString();
-                    var coverageFilePath = _coverageFileName ?? $"{_currentMethodName}.coverage";
-
-                    var logStatement = SyntaxFactory.ParseStatement(
-                        $"System.IO.File.AppendAllText(\"{EscapeString(coverageFilePath)}\", \"{guid}\" + System.Environment.NewLine);"
-                    );
-
-                    _guidCollector?.Add(guid);
-                    var qualifiedName = GetQualifiedMethodName();
-                    if (!string.IsNullOrEmpty(qualifiedName))
-                    {
-                        var sourceFileName = string.IsNullOrWhiteSpace(_sourceFilePath)
-                            ? null
-                            : Path.GetFileName(_sourceFilePath);
-                        GuidMappingStore.AddMapping(guid, qualifiedName, sourceFileName);
-                    }
-                    var visitedStatement = (StatementSyntax)Visit(statement);
-                    newStatements.Add(logStatement);
-                    newStatements.Add(visitedStatement);
-                }
-
-                return node.WithStatements(SyntaxFactory.List(newStatements));
-            }
-
-            private string GetQualifiedMethodName()
-            {
-                if (string.IsNullOrEmpty(_currentMethodName))
-                {
-                    return string.Empty;
-                }
-
-                var namespacePrefix = _namespaceStack.Count > 0
-                    ? string.Join('.', _namespaceStack.Reverse()) + "."
-                    : string.Empty;
-
-                var typePrefix = _typeStack.Count > 0
-                    ? string.Join('.', _typeStack.Reverse()) + "."
-                    : string.Empty;
-
-                return $"{namespacePrefix}{typePrefix}{_currentMethodName}";
-            }
-
-            private static string EscapeString(string value)
-            {
-                return value
-                    .Replace("\\", "\\\\")
-                    .Replace("\"", "\\\"");
-            }
-
-
-        }
-
         private static int RemoveInstrumentationFromSource(string rootPath, CoverageCleanupRewriter rewriter)
         {
             var allCsFiles = Directory.GetFiles(rootPath, "*.cs", SearchOption.AllDirectories)
@@ -532,48 +414,6 @@ namespace SBFLApp
             }
 
             return deletedCount;
-        }
-
-        private class CoverageCleanupRewriter : CSharpSyntaxRewriter
-        {
-            public override SyntaxNode? VisitExpressionStatement(ExpressionStatementSyntax node)
-            {
-                if (IsCoverageLoggingStatement(node))
-                {
-                    return null;
-                }
-
-                return base.VisitExpressionStatement(node);
-            }
-
-            private static bool IsCoverageLoggingStatement(ExpressionStatementSyntax node)
-            {
-                if (node.Expression is not InvocationExpressionSyntax invocation ||
-                    invocation.Expression is not MemberAccessExpressionSyntax memberAccess)
-                {
-                    return false;
-                }
-
-                if (!string.Equals(memberAccess.ToString(), "System.IO.File.AppendAllText", StringComparison.Ordinal))
-                {
-                    return false;
-                }
-
-                var arguments = invocation.ArgumentList.Arguments;
-                if (arguments.Count != 2)
-                {
-                    return false;
-                }
-
-                if (arguments[0].Expression is LiteralExpressionSyntax literal &&
-                    literal.IsKind(SyntaxKind.StringLiteralExpression))
-                {
-                    var pathValue = literal.Token.ValueText;
-                    return pathValue.EndsWith(".coverage", StringComparison.OrdinalIgnoreCase);
-                }
-
-                return false;
-            }
         }
     }
 }
