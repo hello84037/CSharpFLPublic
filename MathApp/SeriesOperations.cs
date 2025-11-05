@@ -14,7 +14,7 @@ namespace MathApp
 
             if (terms == 1)
             {
-                return new List<int> { 0 };
+                return [0];
             }
 
             var sequence = new List<int> { 0, 1 };
@@ -30,10 +30,7 @@ namespace MathApp
 
         public static IReadOnlyList<double> SlidingWindowAverage(IReadOnlyList<double> values, int windowSize)
         {
-            if (values == null)
-            {
-                throw new ArgumentNullException(nameof(values));
-            }
+            ArgumentNullException.ThrowIfNull(values);
 
             if (windowSize <= 0)
             {
@@ -68,15 +65,9 @@ namespace MathApp
 
         public static double WeightedAverage(IReadOnlyList<double> values, IReadOnlyList<double> weights)
         {
-            if (values == null)
-            {
-                throw new ArgumentNullException(nameof(values));
-            }
+            ArgumentNullException.ThrowIfNull(values);
 
-            if (weights == null)
-            {
-                throw new ArgumentNullException(nameof(weights));
-            }
+            ArgumentNullException.ThrowIfNull(weights);
 
             if (values.Count == 0)
             {
