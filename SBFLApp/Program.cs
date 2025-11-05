@@ -68,7 +68,10 @@ namespace SBFLApp
                 SetInjection(group.Key, group.ToList(), testProjectPath, testPassFail);
             }
 
-            var testCoverage = BuildTestCoverage(discoveredTests);
+            var testCoverage = BuildTestCoverage(
+                discoveredTests,
+                solutionDirectory,
+                testProjectDirectory);
 
             Rank rank = new(testCoverage, testPassFail);
             rank.CalculateTarantula();
@@ -126,9 +129,37 @@ namespace SBFLApp
                 .ToList();
         }
 
-        private static Dictionary<string, ISet<string>> BuildTestCoverage(IEnumerable<DiscoveredTest> tests)
+        private static Dictionary<string, ISet<string>> BuildTestCoverage(
+            IEnumerable<DiscoveredTest> tests,
+            string solutionDirectory,
+            string testProjectDirectory)
         {
             var coverage = new Dictionary<string, ISet<string>>(StringComparer.OrdinalIgnoreCase);
+
+            var candidateRoots = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                Directory.GetCurrentDirectory(),
+                AppDomain.CurrentDomain.BaseDirectory,
+                solutionDirectory,
+                testProjectDirectory
+            };
+
+            var binDirectory = Path.Combine(testProjectDirectory, "bin");
+            var binCoverageFiles = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+            if (Directory.Exists(binDirectory))
+            {
+                foreach (var path in Directory.EnumerateFiles(binDirectory, "*.coverage", SearchOption.AllDirectories))
+                {
+                    var fileName = Path.GetFileName(path);
+                    binCoverageFiles[fileName] = path;
+                }
+
+                foreach (var directory in Directory.EnumerateDirectories(binDirectory, "*", SearchOption.AllDirectories))
+                {
+                    candidateRoots.Add(directory);
+                }
+            }
 
             foreach (var test in tests)
             {
@@ -136,11 +167,20 @@ namespace SBFLApp
                 string coverageFileName = $"{fileKey}.coverage";
                 var guidSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-                var searchPaths = new[]
+                var searchPaths = new List<string>();
+
+                foreach (var root in candidateRoots)
                 {
-                    coverageFileName,
-                    Path.Combine(AppDomain.CurrentDomain.BaseDirectory, coverageFileName)
-                };
+                    if (!string.IsNullOrWhiteSpace(root))
+                    {
+                        searchPaths.Add(Path.Combine(root, coverageFileName));
+                    }
+                }
+
+                if (binCoverageFiles.TryGetValue(coverageFileName, out var locatedPath))
+                {
+                    searchPaths.Add(locatedPath);
+                }
 
                 foreach (var path in searchPaths)
                 {
@@ -253,7 +293,6 @@ namespace SBFLApp
             var root = syntaxTree.GetRoot();
 
             var updatedRoot = root;
-            var rootDirty = false;
 
             foreach (var test in tests)
             {
@@ -271,19 +310,16 @@ namespace SBFLApp
                     .OfType<ExpressionStatementSyntax>()
                     .Any(stmt => stmt.ToString().Contains("System.IO.File.AppendAllText"));
 
-                string newGuid = Guid.NewGuid().ToString();
-                string logStatement = $"System.IO.File.AppendAllText(\"{test.CoverageFileStem}.coverage\", \"{newGuid}\");";
+                string coverageFileName = $"{test.CoverageFileStem}.coverage";
+                DeleteCoverageFile(coverageFileName);
 
                 if (alreadyInstrumented)
                 {
-                    var rewriter = new LogStatementRewriter(logStatement);
-                    var newMethodNode = (MethodDeclarationSyntax)rewriter.Visit(methodNode);
-                    updatedRoot = updatedRoot.ReplaceNode(methodNode, newMethodNode);
-                    rootDirty = true;
+                    updatedRoot = RewriteCoverageStatements(filePath, updatedRoot, methodNode, coverageFileName);
                 }
                 else
                 {
-                    Spectrum.SpectrumMethod(filePath, test.MethodName);
+                    Spectrum.SpectrumMethod(filePath, test.MethodName, coverageFileName);
 
                     string reloadedCode = File.ReadAllText(filePath);
                     updatedRoot = CSharpSyntaxTree.ParseText(reloadedCode).GetRoot();
@@ -292,28 +328,62 @@ namespace SBFLApp
 
                     if (reloadedMethod != null)
                     {
-                        var rewriter = new LogStatementRewriter(logStatement);
-                        var newMethodNode = (MethodDeclarationSyntax)rewriter.Visit(reloadedMethod);
-                        updatedRoot = updatedRoot.ReplaceNode(reloadedMethod, newMethodNode);
-                        rootDirty = true;
+                        updatedRoot = RewriteCoverageStatements(filePath, updatedRoot, reloadedMethod, coverageFileName);
                     }
                 }
-
-                if (rootDirty)
-                {
-                    File.WriteAllText(filePath, updatedRoot.NormalizeWhitespace().ToFullString());
-                    Thread.Sleep(1000);
-                    rootDirty = false;
-                }
-
-                string binPath = AppDomain.CurrentDomain.BaseDirectory;
-                string coveragePath = Path.Combine(binPath, $"{test.CoverageFileStem}.coverage");
-                File.AppendAllText(coveragePath, newGuid + Environment.NewLine);
 
                 // Run the test silently
                 bool passed = RunTest(testProjectPath, test.FullyQualifiedName);
                 testPassFail[test.CoverageFileStem] = passed;
             }
+        }
+
+        private static void DeleteCoverageFile(string coverageFileName)
+        {
+            try
+            {
+                if (File.Exists(coverageFileName))
+                {
+                    File.Delete(coverageFileName);
+                }
+
+                var binPath = AppDomain.CurrentDomain.BaseDirectory;
+                var fullPath = Path.Combine(binPath, coverageFileName);
+                if (File.Exists(fullPath))
+                {
+                    File.Delete(fullPath);
+                }
+            }
+            catch (IOException ex)
+            {
+                Console.WriteLine($"Failed to delete coverage file '{coverageFileName}': {ex.Message}");
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                Console.WriteLine($"Failed to delete coverage file '{coverageFileName}': {ex.Message}");
+            }
+        }
+
+        private static SyntaxNode RewriteCoverageStatements(
+            string filePath,
+            SyntaxNode root,
+            MethodDeclarationSyntax methodNode,
+            string coverageFileName)
+        {
+            var rewriter = new LogStatementRewriter(coverageFileName);
+            var newMethodNode = (MethodDeclarationSyntax)rewriter.Visit(methodNode);
+
+            if (ReferenceEquals(newMethodNode, methodNode))
+            {
+                return root;
+            }
+
+            var updatedRoot = root.ReplaceNode(methodNode, newMethodNode);
+            File.WriteAllText(filePath, updatedRoot.NormalizeWhitespace().ToFullString());
+            Thread.Sleep(1000);
+
+            var reloadedCode = File.ReadAllText(filePath);
+            return CSharpSyntaxTree.ParseText(reloadedCode).GetRoot();
         }
 
         private static bool RunTest(string testProjectPath, string fullyQualifiedTestName, bool displayTestOutput = false)
@@ -324,7 +394,7 @@ namespace SBFLApp
 
                 var startInfo = new ProcessStartInfo(
                     "dotnet",
-                    $"test \"{testProjectPath}\" --no-build --filter \"{filter}\""
+                    $"test \"{testProjectPath}\" --filter \"{filter}\""
                 )
                 {
                     RedirectStandardOutput = true,

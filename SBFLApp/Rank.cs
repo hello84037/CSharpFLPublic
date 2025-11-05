@@ -225,15 +225,9 @@ namespace SBFLApp
 
             foreach (var entry in orderedStatements)
             {
-                string tarantulaValue = FormatRank(tarantulaRank, entry.Statement);
-                string ochiaiValue = FormatRank(ochiaiRank, entry.Statement);
-                string dStarValue = FormatRank(dStarRank, entry.Statement);
-                string op2Value = FormatRank(op2Rank, entry.Statement);
-                string jaccardValue = FormatRank(jaccardRank, entry.Statement);
                 var values = new List<string> { Escape(entry.Display) };
                 values.AddRange(calculatedColumns.Select(column => FormatRank(column.Ranks, entry.Statement)));
 
-                writer.WriteLine($"{Escape(entry.Display)},{tarantulaValue},{ochiaiValue},{dStarValue},{op2Value},{jaccardValue}");
                 writer.WriteLine(string.Join(",", values));
             }
         }
