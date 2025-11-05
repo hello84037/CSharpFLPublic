@@ -126,10 +126,16 @@ namespace SBFLApp
                 .ToList();
         }
 
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <param name="tests"></param>
+        /// <returns></returns>
         private static Dictionary<string, ISet<string>> BuildTestCoverage(IEnumerable<DiscoveredTest> tests)
         {
             var coverage = new Dictionary<string, ISet<string>>(StringComparer.OrdinalIgnoreCase);
 
+            // Generate a coverage file for every test function.
             foreach (var test in tests)
             {
                 string fileKey = test.CoverageFileStem;
@@ -149,6 +155,7 @@ namespace SBFLApp
                         continue;
                     }
 
+                    // A coverage file was found, read all the guid values and add them to the guid set.
                     foreach (var line in File.ReadAllLines(path))
                     {
                         if (!string.IsNullOrWhiteSpace(line))
@@ -165,12 +172,19 @@ namespace SBFLApp
                     LogError($"Coverage file not found or empty for test: {coverageFileName}");
                 }
 
+                // Assign the guid set from the file to the coverage data for the test function.
                 coverage[fileKey] = guidSet;
             }
 
             return coverage;
         }
 
+        /// <summary>
+        /// Look through the decendents of the root node for the node specified by the test parameter
+        /// </summary>
+        /// <param name="root"></param>
+        /// <param name="test"></param>
+        /// <returns></returns>
         private static MethodDeclarationSyntax? FindMethod(SyntaxNode root, DiscoveredTest test)
         {
             return root
@@ -198,6 +212,11 @@ namespace SBFLApp
             return false;
         }
 
+        /// <summary>
+        /// Search the attribute name for those attributes related to test functions.
+        /// </summary>
+        /// <param name="attributeName">That attribute name to search.</param>
+        /// <returns>True if this is a test attribute, false otherwise.</returns>
         private static bool IsRecognizedTestAttribute(string attributeName)
         {
             return attributeName.Equals("Fact", StringComparison.OrdinalIgnoreCase)

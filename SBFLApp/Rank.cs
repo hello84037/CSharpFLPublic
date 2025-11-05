@@ -206,13 +206,13 @@ namespace SBFLApp
                 .OrderBy(entry => entry.Display, StringComparer.Ordinal);
 
             var rankColumns = new List<(string Name, Dictionary<string, float> Ranks)>
-        {
-            ("Tarantula", tarantulaRank),
-            ("Ochiai", ochiaiRank),
-            ("DStar", dStarRank),
-            ("Op2", op2Rank),
-            ("Jaccard", jaccardRank)
-        };
+            {
+                ("Tarantula", tarantulaRank),
+                ("Ochiai", ochiaiRank),
+                ("DStar", dStarRank),
+                ("Op2", op2Rank),
+                ("Jaccard", jaccardRank)
+            };
 
             var calculatedColumns = rankColumns
                 .Where(column => column.Ranks != null && column.Ranks.Count > 0)
