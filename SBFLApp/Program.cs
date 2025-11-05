@@ -9,7 +9,7 @@ namespace SBFLApp
     {
         static void Main(string[] args)
         {
-            LogMessage("Running the Spetrum Based Fault Localizer Application\n");
+            LogMessage("Running the Spectrum Based Fault Localizer Application\n");
 
             if (args.Length < 2)
             {
