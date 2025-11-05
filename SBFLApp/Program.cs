@@ -11,9 +11,9 @@ namespace SBFLApp
         {
             LogMessage("Running the Spectrum Based Fault Localizer Application\n");
 
-            if (args.Length < 5)
+            if (args.Length < 3)
             {
-                LogWarning("Usage: dotnet run <solutionDirectory> <testProjectName> <projectUnderTestName> <resetFlag> <verboseFlag>");
+                LogWarning("Usage: dotnet run <solutionDirectory> <testProjectName> <projectUnderTestName> [--reset (-r)] [--verbose (-v)]");
                 return;
             }
 
@@ -21,8 +21,8 @@ namespace SBFLApp
             string solutionDirectory = args[0];
             string testProjectName = args[1];
             string projectUnderTestName = args[2];
-            bool resetRequested = ParseBooleanFlag(args[3], expectedName: "reset flag");
-            bool verboseRequested = ParseBooleanFlag(args[4], expectedName: "verbose flag");
+            bool resetRequested = args.Any(arg => string.Equals(arg, "--reset", StringComparison.OrdinalIgnoreCase) || string.Equals(arg, "-r", StringComparison.OrdinalIgnoreCase));
+            bool verboseRequested = args.Any(arg => string.Equals(arg, "--verbose", StringComparison.OrdinalIgnoreCase) || string.Equals(arg, "-v", StringComparison.OrdinalIgnoreCase));
 
             // Verify the solution directory to be tested exists.
             if (!Directory.Exists(solutionDirectory))
