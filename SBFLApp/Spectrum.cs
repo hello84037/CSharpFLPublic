@@ -149,7 +149,7 @@ namespace SBFLApp
         }
 
         // Instrument every C# file in the project for coverage and save modified copies to a coverage folder
-        public static void SpectrumProject(string projectPath, string testName)
+        public static void SpectrumProject(string projectPath)
         {
             var coverageFolder = Path.Combine(projectPath, "coverage");
             Directory.CreateDirectory(coverageFolder);

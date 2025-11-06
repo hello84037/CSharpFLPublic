@@ -13,60 +13,25 @@ namespace SBFLApp
         {
             LogMessage("Running the Spectrum Based Fault Localizer Application\n");
 
-            if (args.Length < 3)
+            CommandLineArguments? arguments = CommandLineArguments.Parse(args);
+            if (arguments == null)
             {
-                LogWarning("Usage: dotnet run <solutionDirectory> <testProjectName> <projectUnderTestName> [resetFlag] [verboseFlag]");
-                return;
-            }
-
-            // Parse the given commandline arguments.
-            string solutionDirectory = args[0];
-            string testProjectName = args[1];
-            string projectUnderTestName = args[2];
-            bool resetRequested = args.Length > 3 ? ParseBooleanFlag(args[3], expectedName: "reset flag") : false;
-            bool verboseRequested = args.Length > 4 ? ParseBooleanFlag(args[4], expectedName: "verbose flag") : false;
-
-            if (args.Length > 5)
-            {
-                var extras = string.Join(", ", args.Skip(5));
-                LogWarning($"Ignoring extra arguments: {extras}");
-            }
-
-            // Verify the solution directory to be tested exists.
-            if (!Directory.Exists(solutionDirectory))
-            {
-                LogError($"Solution directory not found: {solutionDirectory}");
-                return;
-            }
-            
-            // Verify the test project path exists.  The assumption is that the project name matches the project directory.
-            string testProjectDirectory = Path.Combine(solutionDirectory, testProjectName);
-            if (!Directory.Exists(testProjectDirectory))
-            {
-                LogError($"Test project directory not found: {testProjectDirectory}");
-                return;
-            }
-
-            string projectUnderTestDirectory = Path.Combine(solutionDirectory, projectUnderTestName);
-            if (!Directory.Exists(projectUnderTestDirectory))
-            {
-                LogError($"Project under test directory not found: {projectUnderTestDirectory}");
                 return;
             }
 
             // Get the path to the test project.  If there isn't a .csproj file, then use the directory.
-            string? testProjectFile = Directory.EnumerateFiles(testProjectDirectory, "*.csproj", SearchOption.TopDirectoryOnly).FirstOrDefault();
-            string testProjectPath = testProjectFile ?? testProjectDirectory;
+            string? testProjectFile = Directory.EnumerateFiles(arguments.TestProjectDirectory, "*.csproj", SearchOption.TopDirectoryOnly).FirstOrDefault();
+            string testProjectPath = testProjectFile ?? arguments.TestProjectDirectory;
 
             // If a reset was requested, we want to erase all instrumentation and coverage data to start fresh.
-            if (resetRequested)
+            if (arguments.ResetRequested)
             {
                 Console.WriteLine("Resetting existing instrumentation artifacts...");
-                Spectrum.ResetInstrumentation(solutionDirectory, AppDomain.CurrentDomain.BaseDirectory);
+                Spectrum.ResetInstrumentation(arguments.SolutionDirectory, AppDomain.CurrentDomain.BaseDirectory);
             }
 
             // Get all the .cs files in the test project directory ignoreing the bin and obj directories.
-            var allTestFiles = Directory.EnumerateFiles(testProjectDirectory, "*.cs", SearchOption.AllDirectories)
+            var allTestFiles = Directory.EnumerateFiles(arguments.TestProjectDirectory, "*.cs", SearchOption.AllDirectories)
                 .Where(file => !file.Contains(Path.DirectorySeparatorChar + "bin" + Path.DirectorySeparatorChar)
                             && !file.Contains(Path.DirectorySeparatorChar + "obj" + Path.DirectorySeparatorChar))
                 .ToList();
@@ -76,7 +41,7 @@ namespace SBFLApp
 
             if (discoveredTests.Count == 0)
             {
-                LogError($"No tests discovered in {testProjectDirectory}.");
+                LogError($"No tests discovered in {arguments.TestProjectDirectory}.");
                 return;
             }
 
@@ -86,7 +51,7 @@ namespace SBFLApp
                 Console.WriteLine($" - {test.FullyQualifiedName}");
             }
 
-            var productionSourceFiles = DiscoverProductionSourceFiles(projectUnderTestDirectory);
+            var productionSourceFiles = DiscoverProductionSourceFiles(arguments.ProjectUnderTestDirectory);
 
             if (productionSourceFiles.Count == 0)
             {
@@ -99,15 +64,17 @@ namespace SBFLApp
                 productionSourceFiles,
                 discoveredTests,
                 testProjectPath,
-                testProjectDirectory,
-                solutionDirectory,
+                arguments.TestProjectDirectory,
+                arguments.SolutionDirectory,
                 ref testPassFail,
-                verboseRequested);
+                arguments.VerboseRequested);
+
+            //TODO Jake pull run tests out of setinjection
 
             var testCoverage = BuildTestCoverage(
                 discoveredTests,
-                solutionDirectory,
-                testProjectDirectory);
+                arguments.SolutionDirectory,
+                arguments.TestProjectDirectory);
 
             Rank rank = new(testCoverage, testPassFail);
             rank.CalculateTarantula();
@@ -116,7 +83,7 @@ namespace SBFLApp
             rank.CalculateOp2();
             rank.CalculateJaccard();
 
-            string csvOutputPath = Path.Combine(solutionDirectory, "suspiciousness_report.csv");
+            string csvOutputPath = Path.Combine(arguments.SolutionDirectory, "suspiciousness_report.csv");
             rank.WriteSuspiciousnessReport(csvOutputPath);
             LogMessage($"Suspiciousness scores written to {csvOutputPath}.");
         }
@@ -334,7 +301,7 @@ namespace SBFLApp
             }
         }
 
-        private static IReadOnlyList<string> EnsureProductionInstrumentation(IReadOnlyList<string> sourceFiles)
+        private static List<string> EnsureProductionInstrumentation(IReadOnlyList<string> sourceFiles)
         {
             var instrumentedFiles = new List<string>();
 
@@ -472,7 +439,7 @@ namespace SBFLApp
             return CSharpSyntaxTree.ParseText(reloadedCode).GetRoot();
         }
 
-        private static IReadOnlyList<string> DiscoverProductionSourceFiles(string projectUnderTestDirectory)
+        private static List<string> DiscoverProductionSourceFiles(string projectUnderTestDirectory)
         {
             var files = new List<string>();
 
@@ -752,5 +719,74 @@ namespace SBFLApp
             Console.ResetColor();
         }
 
+        private class CommandLineArguments
+        {
+            public string SolutionDirectory { get; set; }
+            public string TestProjectDirectory { get; set; }
+            public string ProjectUnderTestDirectory { get; set; }
+            public bool ResetRequested { get; set; }
+            public bool VerboseRequested { get; set; }
+
+            private CommandLineArguments()
+            {
+                SolutionDirectory = string.Empty;
+                TestProjectDirectory = string.Empty;
+                ProjectUnderTestDirectory = string.Empty;
+                ResetRequested = false;
+                VerboseRequested = false;
+            }
+
+            public static CommandLineArguments? Parse(string[] args)
+            {
+                if (args.Length < 3)
+                {
+                    LogWarning("Usage: dotnet run <solutionDirectory> <testProjectName> <projectUnderTestName> [resetFlag] [verboseFlag]");
+                    return null;
+                }
+
+
+                // Parse the given commandline arguments.
+                CommandLineArguments arguments = new()
+                {
+                    SolutionDirectory = args[0],
+                    ResetRequested = args.Any(arg => string.Equals(arg, "--reset", StringComparison.OrdinalIgnoreCase) || string.Equals(arg, "-r", StringComparison.OrdinalIgnoreCase)),
+                    VerboseRequested = args.Any(arg => string.Equals(arg, "--verbose", StringComparison.OrdinalIgnoreCase) || string.Equals(arg, "-v", StringComparison.OrdinalIgnoreCase))
+                };
+
+                string testProjectName = args[1];
+                string projectUnderTestName = args[2];
+
+                if (args.Length > 5)
+                {
+                    var extras = string.Join(", ", args.Skip(5));
+                    LogWarning($"Ignoring extra arguments: {extras}");
+                }
+
+                // Verify the solution directory to be tested exists.
+                if (!Directory.Exists(arguments.SolutionDirectory))
+                {
+                    LogError($"Solution directory not found: {arguments.SolutionDirectory}");
+                    return null;
+                }
+
+                // Verify the test project path exists.  The assumption is that the project name matches the project directory.
+                arguments.TestProjectDirectory = Path.Combine(arguments.SolutionDirectory, testProjectName);
+                if (!Directory.Exists(arguments.TestProjectDirectory))
+                {
+                    LogError($"Test project directory not found: {arguments.TestProjectDirectory}");
+                    return null;
+                }
+
+                // Verify the project under test path exists.  The assumption is that the project name matches the project directory.
+                arguments.ProjectUnderTestDirectory = Path.Combine(arguments.SolutionDirectory, projectUnderTestName);
+                if (!Directory.Exists(arguments.ProjectUnderTestDirectory))
+                {
+                    LogError($"Project under test directory not found: {arguments.ProjectUnderTestDirectory}");
+                    return null;
+                }
+
+                return arguments;
+            }
+        }
     }
 }
