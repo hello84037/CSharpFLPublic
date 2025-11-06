@@ -7,12 +7,14 @@ namespace SBFLApp
 {
     class Program
     {
-        private const string TemporaryCoverageFileName = "__sbfl_current_test.coverage.tmp";
+        private static readonly string CoverageDirectory = Path.Combine(Directory.GetCurrentDirectory(), "Coverage");
+        private static readonly string TemporaryCoverageFileName = Path.Combine(CoverageDirectory, "__sbfl_current_test.coverage.tmp");
 
         static void Main(string[] args)
         {
-            LogMessage("Running the Spectrum Based Fault Localizer Application\n");
+            ConsoleLogger.Info("Running the Spectrum Based Fault Localizer Application\n");
 
+            // Process command line arguments.
             CommandLineArguments? arguments = CommandLineArguments.Parse(args);
             if (arguments == null)
             {
@@ -26,12 +28,49 @@ namespace SBFLApp
             // If a reset was requested, we want to erase all instrumentation and coverage data to start fresh.
             if (arguments.ResetRequested)
             {
-                Console.WriteLine("Resetting existing instrumentation artifacts...");
+                Console.WriteLine("Resetting existing instrumentation artifacts.");
                 Spectrum.ResetInstrumentation(arguments.SolutionDirectory, AppDomain.CurrentDomain.BaseDirectory);
             }
 
+            // Get a list of the tests in the test project directory.
+            var discoveredTests = GetListOfTests(arguments.TestProjectDirectory);
+
+            // Get a list of files to add coverage statements to.
+            var productionSourceFiles = DiscoverProductionSourceFiles(arguments.ProjectUnderTestDirectory);
+            if (productionSourceFiles.Count == 0)
+            {
+                ConsoleLogger.Warning("No production source files discovered for instrumentation.");
+                return;
+            }
+
+            EnsureProductionInstrumentation(productionSourceFiles, TemporaryCoverageFileName);
+
+            // Run the tests and collect the pass/fail data.
+            var testPassFailData = RunTests(discoveredTests, testProjectPath, arguments.VerboseRequested);
+
+            var testCoverage = BuildTestCoverage(discoveredTests);
+
+            Rank rank = new(testCoverage, testPassFailData);
+            rank.CalculateTarantula();
+            rank.CalculateOchiai();
+            rank.CalculateDStar();
+            rank.CalculateOp2();
+            rank.CalculateJaccard();
+
+            string csvOutputPath = Path.Combine(arguments.SolutionDirectory, "suspiciousness_report.csv");
+            rank.WriteSuspiciousnessReport(csvOutputPath);
+            ConsoleLogger.Info($"Suspiciousness scores written to {csvOutputPath}.");
+        }
+
+        /// <summary>
+        /// Get a list of <see cref="DiscoveredTest"/> in the given test project directory.
+        /// </summary>
+        /// <param name="testProjectDirectory">The directory to search.</param>
+        /// <returns>A list of <see cref="DiscoveredTest"/> objects.</returns>
+        private static List<DiscoveredTest> GetListOfTests(string testProjectDirectory)
+        {
             // Get all the .cs files in the test project directory ignoreing the bin and obj directories.
-            var allTestFiles = Directory.EnumerateFiles(arguments.TestProjectDirectory, "*.cs", SearchOption.AllDirectories)
+            var allTestFiles = Directory.EnumerateFiles(testProjectDirectory, "*.cs", SearchOption.AllDirectories)
                 .Where(file => !file.Contains(Path.DirectorySeparatorChar + "bin" + Path.DirectorySeparatorChar)
                             && !file.Contains(Path.DirectorySeparatorChar + "obj" + Path.DirectorySeparatorChar))
                 .ToList();
@@ -41,51 +80,18 @@ namespace SBFLApp
 
             if (discoveredTests.Count == 0)
             {
-                LogError($"No tests discovered in {arguments.TestProjectDirectory}.");
-                return;
+                ConsoleLogger.Error($"No tests discovered in {testProjectDirectory}.");
             }
-
-            LogMessage("Discovered the following tests:");
-            foreach (var test in discoveredTests)
+            else
             {
-                Console.WriteLine($" - {test.FullyQualifiedName}");
+                ConsoleLogger.Info("Discovered the following tests:");
+                foreach (var test in discoveredTests)
+                {
+                    Console.WriteLine($" - {test.FullyQualifiedName}");
+                }
             }
 
-            var productionSourceFiles = DiscoverProductionSourceFiles(arguments.ProjectUnderTestDirectory);
-
-            if (productionSourceFiles.Count == 0)
-            {
-                LogWarning("No production source files discovered for instrumentation.");
-            }
-
-            // Create a dictionary for storing the test and the pass/fail status
-            var testPassFail = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
-            SetInjection(
-                productionSourceFiles,
-                discoveredTests,
-                testProjectPath,
-                arguments.TestProjectDirectory,
-                arguments.SolutionDirectory,
-                ref testPassFail,
-                arguments.VerboseRequested);
-
-            //TODO Jake pull run tests out of setinjection
-
-            var testCoverage = BuildTestCoverage(
-                discoveredTests,
-                arguments.SolutionDirectory,
-                arguments.TestProjectDirectory);
-
-            Rank rank = new(testCoverage, testPassFail);
-            rank.CalculateTarantula();
-            rank.CalculateOchiai();
-            rank.CalculateDStar();
-            rank.CalculateOp2();
-            rank.CalculateJaccard();
-
-            string csvOutputPath = Path.Combine(arguments.SolutionDirectory, "suspiciousness_report.csv");
-            rank.WriteSuspiciousnessReport(csvOutputPath);
-            LogMessage($"Suspiciousness scores written to {csvOutputPath}.");
+            return discoveredTests;
         }
 
         private sealed record DiscoveredTest(string FilePath, string TypeDisplayName, string MethodName, string FullyQualifiedName)
@@ -154,59 +160,35 @@ namespace SBFLApp
         /// <param name="solutionDirectory"></param>
         /// <param name="testProjectDirectory"></param>
         /// <returns></returns>
-        private static Dictionary<string, ISet<string>> BuildTestCoverage(
-            IEnumerable<DiscoveredTest> tests,
-            string solutionDirectory,
-            string testProjectDirectory)
+        private static Dictionary<string, ISet<string>> BuildTestCoverage(IEnumerable<DiscoveredTest> tests)
         {
             var coverage = new Dictionary<string, ISet<string>>(StringComparer.OrdinalIgnoreCase);
-
-            var candidateRoots = BuildCoverageCandidateRoots(solutionDirectory, testProjectDirectory);
-            var binCoverageFiles = IndexCoverageFiles(Path.Combine(testProjectDirectory, "bin"), "*.coverage");
 
             foreach (var test in tests)
             {
                 string fileKey = test.CoverageFileStem;
-                string coverageFileName = $"{fileKey}.coverage";
+                string coverageFileName = Path.Combine(CoverageDirectory, $"{fileKey}.coverage");
                 var guidSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-                var searchPaths = new List<string>();
 
-                foreach (var root in candidateRoots)
+                if (!File.Exists(coverageFileName))
                 {
-                    if (!string.IsNullOrWhiteSpace(root))
+                    continue;
+                }
+
+                // A coverage file was found, read all the guid values and add them to the guid set.
+                foreach (var line in File.ReadAllLines(coverageFileName))
+                {
+                    if (!string.IsNullOrWhiteSpace(line))
                     {
-                        searchPaths.Add(Path.Combine(root, coverageFileName));
+                        guidSet.Add(line.Trim());
                     }
                 }
 
-                if (binCoverageFiles.TryGetValue(coverageFileName, out var locatedPath))
-                {
-                    searchPaths.Add(locatedPath);
-                }
-
-                foreach (var path in searchPaths)
-                {
-                    if (!File.Exists(path))
-                    {
-                        continue;
-                    }
-
-                    // A coverage file was found, read all the guid values and add them to the guid set.
-                    foreach (var line in File.ReadAllLines(path))
-                    {
-                        if (!string.IsNullOrWhiteSpace(line))
-                        {
-                            guidSet.Add(line.Trim());
-                        }
-                    }
-
-                    break;
-                }
 
                 if (guidSet.Count == 0)
                 {
-                    LogError($"Coverage file not found or empty for test: {coverageFileName}");
+                    ConsoleLogger.Error($"Coverage file not found or empty for test: {coverageFileName}");
                 }
 
                 // Assign the guid set from the file to the coverage data for the test function.
@@ -254,91 +236,83 @@ namespace SBFLApp
         }
 
         /// <summary>
-        /// Ensures the production code is instrumented for coverage and executes each discovered test.
+        /// Runs each test and returns the pass/fail information.
         /// </summary>
-        /// <param name="sourceFiles">The production source files targeted for instrumentation.</param>
         /// <param name="tests">The <see cref="DiscoveredTest"/> instances to execute.</param>
         /// <param name="testProjectPath">The path to the test csproj file.</param>
-        /// <param name="testProjectDirectory">The directory containing the test project.</param>
-        /// <param name="solutionDirectory">The root directory of the solution.</param>
         /// <param name="verbose">If verbose is requested, the test output will be displayed.</param>
-        /// <param name="testPassFail">A dictionary to store the test and test result.</param>
-        private static void SetInjection(
-            in IReadOnlyList<string> sourceFiles,
+        private static Dictionary<string, bool> RunTests(
             in IReadOnlyList<DiscoveredTest> tests,
             in string testProjectPath,
-            in string testProjectDirectory,
-            in string solutionDirectory,
-            ref Dictionary<string, bool> testPassFail,
             in bool verbose = false)
         {
-            LogMessage("Injection and testing in progress...");
+            ConsoleLogger.Info("Testing in progress...");
 
-            var instrumentedFiles = EnsureProductionInstrumentation(sourceFiles);
+            var testPassFailData = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
 
-            foreach (var file in instrumentedFiles)
-            {
-                UpdateCoverageFileTarget(file, TemporaryCoverageFileName);
-            }
-
-            var coverageRoots = BuildCoverageCandidateRoots(solutionDirectory, testProjectDirectory);
+            CleanupCoverageData();
 
             foreach (var test in tests)
             {
-                // Get the coverage filename and delete if there is an existing one.
-                string coverageFileName = $"{test.CoverageFileStem}.coverage";
-                DeleteCoverageFile(coverageFileName, coverageRoots);
-                DeleteCoverageFile(TemporaryCoverageFileName, coverageRoots);
+                // Get the coverage filename.
+                string coverageFileName = Path.Combine(CoverageDirectory, $"{test.CoverageFileStem}.coverage");
 
                 // Run the test silently
                 bool passed = RunTest(testProjectPath, test.FullyQualifiedName, verbose);
-                testPassFail[test.CoverageFileStem] = passed;
+                testPassFailData[test.CoverageFileStem] = passed;
 
-                if (!TryPromoteTemporaryCoverageFile(TemporaryCoverageFileName, coverageFileName, coverageRoots))
-                {
-                    LogError($"Coverage data not found or could not be saved for test: {test.FullyQualifiedName}");
-                }
+                PromoteTemporaryCoverageFile(TemporaryCoverageFileName, coverageFileName);
+
+                // Delete the temporary coverage file if there is one.
+                DeleteCoverageFile(TemporaryCoverageFileName);
             }
+
+            return testPassFailData;
         }
 
-        private static List<string> EnsureProductionInstrumentation(IReadOnlyList<string> sourceFiles)
+        /// <summary>
+        /// Checks the files to see if they contain coverage statements.  If they don't,
+        /// coverage statements are added to the file.  If they already contain coverage statements,
+        /// Verify they are using the correct coverage file.
+        /// </summary>
+        /// <param name="sourceFiles">The files to ensure instrumentation is added to.</param>
+        /// <returns>The list of files with instrumentation added.</returns>
+        private static void EnsureProductionInstrumentation(IReadOnlyList<string> sourceFiles, string? coverageFileName = null)
         {
-            var instrumentedFiles = new List<string>();
-
             foreach (var file in sourceFiles)
             {
                 try
                 {
                     string sourceCode = File.ReadAllText(file);
 
+                    // Add instrumentation if not already there.
                     if (!ContainsCoverageInstrumentation(sourceCode))
                     {
-                        Spectrum.SpectrumAll(file);
-                        sourceCode = File.ReadAllText(file);
-                    }
-
-                    if (ContainsCoverageInstrumentation(sourceCode))
-                    {
-                        instrumentedFiles.Add(file);
+                        Spectrum.SpectrumAll(file, coverageFileName);
                     }
                     else
                     {
-                        LogWarning($"Instrumentation could not be added to '{file}'.");
+                        // Make sure the correct coverage filename is being used in existing instrumentation.
+                        UpdateCoverageFileTarget(file, TemporaryCoverageFileName);
                     }
                 }
                 catch (IOException ex)
                 {
-                    LogWarning($"Failed to instrument '{file}': {ex.Message}");
+                    ConsoleLogger.Warning($"Failed to instrument '{file}': {ex.Message}");
                 }
                 catch (UnauthorizedAccessException ex)
                 {
-                    LogWarning($"Failed to instrument '{file}': {ex.Message}");
+                    ConsoleLogger.Warning($"Failed to instrument '{file}': {ex.Message}");
                 }
             }
-
-            return instrumentedFiles;
         }
 
+
+        /// <summary>
+        /// Update the coverage file path in the coverage instrumentation statements.
+        /// </summary>
+        /// <param name="filePath">The file path of the file to update.</param>
+        /// <param name="coverageFileName">The path to the coverage file.</param>
         private static void UpdateCoverageFileTarget(string filePath, string coverageFileName)
         {
             string sourceCode = File.ReadAllText(filePath);
@@ -357,55 +331,44 @@ namespace SBFLApp
             return sourceCode.Contains("System.IO.File.AppendAllText", StringComparison.Ordinal);
         }
 
-        private static void DeleteCoverageFile(string coverageFileName, IEnumerable<string>? candidateRoots = null)
-        {
-            if (string.IsNullOrWhiteSpace(coverageFileName))
-            {
-                return;
-            }
-
-            if (Path.IsPathRooted(coverageFileName))
-            {
-                TryDeleteFile(coverageFileName);
-                return;
-            }
-
-            var roots = candidateRoots ?? new[]
-            {
-                Directory.GetCurrentDirectory(),
-                AppDomain.CurrentDomain.BaseDirectory
-            };
-
-            var processed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-            foreach (var root in roots)
-            {
-                if (string.IsNullOrWhiteSpace(root) || !processed.Add(root))
-                {
-                    continue;
-                }
-
-                var candidatePath = Path.Combine(root, coverageFileName);
-                TryDeleteFile(candidatePath);
-            }
-        }
-
-        private static void TryDeleteFile(string filePath)
+        private static void DeleteCoverageFile(string coverageFile)
         {
             try
             {
-                if (File.Exists(filePath))
+                if (File.Exists(coverageFile))
                 {
-                    File.Delete(filePath);
+                    File.Delete(coverageFile);
                 }
             }
-            catch (IOException ex)
+            catch (Exception ex)
             {
-                Console.WriteLine($"Failed to delete coverage file '{filePath}': {ex.Message}");
+                ConsoleLogger.Warning("Unable to delete existing coverage data.");
+                ConsoleLogger.Warning(ex.Message);
             }
-            catch (UnauthorizedAccessException ex)
+        }
+
+        private static void CleanupCoverageData()
+        {
+            try
             {
-                Console.WriteLine($"Failed to delete coverage file '{filePath}': {ex.Message}");
+                if (Directory.Exists(CoverageDirectory))
+                {
+                    foreach (string file in Directory.EnumerateFiles(CoverageDirectory))
+                    {
+                        File.Delete(file);
+                    }
+                    Directory.Delete(CoverageDirectory, true);
+                }
+                else
+                {
+                    Directory.CreateDirectory(CoverageDirectory);
+                }
+
+            }
+            catch (Exception ex)
+            {
+                ConsoleLogger.Warning("Unable to delete existing coverage data.");
+                ConsoleLogger.Warning(ex.Message);
             }
         }
 
@@ -461,94 +424,25 @@ namespace SBFLApp
             return files;
         }
 
-        private static HashSet<string> BuildCoverageCandidateRoots(string solutionDirectory, string testProjectDirectory)
+        private static void PromoteTemporaryCoverageFile(string temporaryCoverageFileName, string finalCoverageFileName)
         {
-            var candidateRoots = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            try
             {
-                Directory.GetCurrentDirectory(),
-                AppDomain.CurrentDomain.BaseDirectory,
-                solutionDirectory,
-                testProjectDirectory
-            };
-
-            var binDirectory = Path.Combine(testProjectDirectory, "bin");
-            if (Directory.Exists(binDirectory))
-            {
-                candidateRoots.Add(binDirectory);
-
-                foreach (var directory in Directory.EnumerateDirectories(binDirectory, "*", SearchOption.AllDirectories))
+                if (File.Exists(finalCoverageFileName))
                 {
-                    candidateRoots.Add(directory);
+                    File.Delete(finalCoverageFileName);
                 }
+
+                File.Move(temporaryCoverageFileName, finalCoverageFileName);
             }
-
-            return candidateRoots;
-        }
-
-        private static Dictionary<string, string> IndexCoverageFiles(string rootDirectory, string searchPattern)
-        {
-            var files = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-
-            if (!Directory.Exists(rootDirectory))
+            catch (IOException ex)
             {
-                return files;
+                ConsoleLogger.Warning($"Failed to move coverage file '{temporaryCoverageFileName}' to '{finalCoverageFileName}': {ex.Message}");
             }
-
-            foreach (var path in Directory.EnumerateFiles(rootDirectory, searchPattern, SearchOption.AllDirectories))
+            catch (UnauthorizedAccessException ex)
             {
-                var fileName = Path.GetFileName(path);
-                files[fileName] = path;
+                ConsoleLogger.Warning($"Failed to move coverage file '{temporaryCoverageFileName}' to '{finalCoverageFileName}': {ex.Message}");
             }
-
-            return files;
-        }
-
-        private static bool TryPromoteTemporaryCoverageFile(
-            string temporaryCoverageFileName,
-            string finalCoverageFileName,
-            IReadOnlyCollection<string> candidateRoots)
-        {
-            foreach (var root in candidateRoots)
-            {
-                if (string.IsNullOrWhiteSpace(root))
-                {
-                    continue;
-                }
-
-                var tempPath = Path.IsPathRooted(temporaryCoverageFileName)
-                    ? temporaryCoverageFileName
-                    : Path.Combine(root, temporaryCoverageFileName);
-
-                if (!File.Exists(tempPath))
-                {
-                    continue;
-                }
-
-                var finalPath = Path.IsPathRooted(finalCoverageFileName)
-                    ? finalCoverageFileName
-                    : Path.Combine(root, finalCoverageFileName);
-
-                try
-                {
-                    if (File.Exists(finalPath))
-                    {
-                        File.Delete(finalPath);
-                    }
-
-                    File.Move(tempPath, finalPath);
-                    return true;
-                }
-                catch (IOException ex)
-                {
-                    Console.WriteLine($"Failed to move coverage file '{tempPath}' to '{finalPath}': {ex.Message}");
-                }
-                catch (UnauthorizedAccessException ex)
-                {
-                    Console.WriteLine($"Failed to move coverage file '{tempPath}' to '{finalPath}': {ex.Message}");
-                }
-            }
-
-            return false;
         }
 
         private static bool ShouldSkipProjectFile(string filePath)
@@ -609,19 +503,20 @@ namespace SBFLApp
                 return true;
             }
 
-            LogWarning($"Unrecognized value '{value}' for {expectedName}. Defaulting to 'false'.");
+            ConsoleLogger.Warning($"Unrecognized value '{value}' for {expectedName}. Defaulting to 'false'.");
             return false;
         }
 
         private static bool RunTest(string testProjectPath, string fullyQualifiedTestName, bool verbose = false)
         {
+            ConsoleLogger.Info($"Running {fullyQualifiedTestName}...");
             try
             {
                 string filter = $"FullyQualifiedName~{fullyQualifiedTestName}";
 
                 var startInfo = new ProcessStartInfo(
                     "dotnet",
-                    $"test \"{testProjectPath}\" --filter \"{filter}\""
+                    $"test {testProjectPath} --filter {filter}"
                 )
                 {
                     RedirectStandardOutput = true,
@@ -633,14 +528,14 @@ namespace SBFLApp
                 using Process? process = Process.Start(startInfo);
                 if (process is null)
                 {
-                    LogError("Failed to start test process.");
+                    ConsoleLogger.Error("Failed to start test process.");
                     return false;
                 }
 
                 bool exited = process.WaitForExit(30 * 1000);
                 if (!exited)
-                { 
-                    LogWarning("Process timed out. Killing the process...");
+                {
+                    ConsoleLogger.Warning("Process timed out. Killing the process...");
                     process.Kill();
                     return false;
                 }
@@ -662,61 +557,9 @@ namespace SBFLApp
             }
             catch (Exception ex)
             {
-                LogError($"Error running test: {ex.Message}");
+                ConsoleLogger.Error($"Error running test: {ex.Message}");
                 return false;
             }
-        }
-
-        /// <summary>
-        /// Write to the console using the <see cref="ConsoleColor.Cyan"/>.
-        /// </summary>
-        /// <param name="message">The message to write to the console.</param>
-        private static void LogMessage(string message)
-        {
-            ConsoleWriteLine($"Info: {message}", ConsoleColor.Cyan);
-
-        }
-
-        /// <summary>
-        /// Write to the console using the <see cref="ConsoleColor.DarkYellow"/>.
-        /// </summary>
-        /// <param name="message">The message to write to the console.</param>
-        private static void LogWarning(string message)
-        {
-            ConsoleWriteLine($"Warning: {message}", ConsoleColor.DarkYellow);
-        }
-
-        /// <summary>
-        /// Write to the console using the <see cref="ConsoleColor.Red"/>.
-        /// </summary>
-        /// <param name="message">The message to write to the console.</param>
-        private static void LogError(string message)
-        {
-            ConsoleWriteLine($"Error: {message}", ConsoleColor.Red);
-        }
-
-        /// <summary>
-        /// Write a message with an appended newline to the console using the specified <see cref="ConsoleColor"/>.
-        /// </summary>
-        /// <param name="message">The message to write to the console.</param>
-        /// <param name="color">The color to use.</param>
-        private static void ConsoleWriteLine(string message, ConsoleColor color = ConsoleColor.Gray)
-        {
-            Console.ForegroundColor = color;
-            Console.WriteLine(message);
-            Console.ResetColor();
-        }
-
-        /// <summary>
-        /// Write a message to the console using the specified <see cref="ConsoleColor"/>.
-        /// </summary>
-        /// <param name="message">The message to write to the console.</param>
-        /// <param name="color">The color to use.</param>
-        static void ConsoleWrite(string message, ConsoleColor color = ConsoleColor.Gray)
-        {
-            Console.ForegroundColor = color;
-            Console.Write(message);
-            Console.ResetColor();
         }
 
         private class CommandLineArguments
@@ -740,7 +583,7 @@ namespace SBFLApp
             {
                 if (args.Length < 3)
                 {
-                    LogWarning("Usage: dotnet run <solutionDirectory> <testProjectName> <projectUnderTestName> [resetFlag] [verboseFlag]");
+                    ConsoleLogger.Warning("Usage: dotnet run <solutionDirectory> <testProjectName> <projectUnderTestName> [resetFlag] [verboseFlag]");
                     return null;
                 }
 
@@ -759,13 +602,13 @@ namespace SBFLApp
                 if (args.Length > 5)
                 {
                     var extras = string.Join(", ", args.Skip(5));
-                    LogWarning($"Ignoring extra arguments: {extras}");
+                    ConsoleLogger.Warning($"Ignoring extra arguments: {extras}");
                 }
 
                 // Verify the solution directory to be tested exists.
                 if (!Directory.Exists(arguments.SolutionDirectory))
                 {
-                    LogError($"Solution directory not found: {arguments.SolutionDirectory}");
+                    ConsoleLogger.Error($"Solution directory not found: {arguments.SolutionDirectory}");
                     return null;
                 }
 
@@ -773,7 +616,7 @@ namespace SBFLApp
                 arguments.TestProjectDirectory = Path.Combine(arguments.SolutionDirectory, testProjectName);
                 if (!Directory.Exists(arguments.TestProjectDirectory))
                 {
-                    LogError($"Test project directory not found: {arguments.TestProjectDirectory}");
+                    ConsoleLogger.Error($"Test project directory not found: {arguments.TestProjectDirectory}");
                     return null;
                 }
 
@@ -781,7 +624,7 @@ namespace SBFLApp
                 arguments.ProjectUnderTestDirectory = Path.Combine(arguments.SolutionDirectory, projectUnderTestName);
                 if (!Directory.Exists(arguments.ProjectUnderTestDirectory))
                 {
-                    LogError($"Project under test directory not found: {arguments.ProjectUnderTestDirectory}");
+                    ConsoleLogger.Error($"Project under test directory not found: {arguments.ProjectUnderTestDirectory}");
                     return null;
                 }
 

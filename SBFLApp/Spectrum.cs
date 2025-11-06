@@ -63,41 +63,27 @@ namespace SBFLApp
         /// <summary>
         /// Inject coverage logging into all methods within the specified file.
         /// </summary>
-        /// <param name="filePath"></param>
-        public static void SpectrumAll(string filePath)
+        /// <param name="filePath">The path to the file.</param>
+        public static void SpectrumAll(string filePath, string? coverageFileName = null)
         {
-            var sourceCode = File.ReadAllText(filePath);
-            var tree = CSharpSyntaxTree.ParseText(sourceCode);
-            var root = tree.GetRoot();
-            var rewriter = new CoverageInjector(sourceFilePath: filePath);
-            var newRoot = rewriter.Visit(root);
-            File.WriteAllText(filePath, newRoot.NormalizeWhitespace().ToFullString());
-            Console.WriteLine($"Injected logging into all methods in '{filePath}'.");
-        }
+            ConsoleLogger.Info($"Injecting logging into all methods in '{filePath}'.");
 
-        // Inject coverage logging into all methods in the file using the provided testName; create coverage folder and file
-        public static void SpectrumAllForTest(string filePath, string testName)
-        {
+            // Read the file and convert to a syntax tree node.
             var sourceCode = File.ReadAllText(filePath);
             var tree = CSharpSyntaxTree.ParseText(sourceCode);
             var root = tree.GetRoot();
 
-            var guidCollector = new List<string>();
-            var binDirectory = AppDomain.CurrentDomain.BaseDirectory;
-            var coverageFolder = Path.Combine(binDirectory, $"{testName}.coverage");
-            Directory.CreateDirectory(coverageFolder);
-            var coverageFilePath = Path.Combine(coverageFolder, $"{testName}.coverage");
-
-            var rewriter = new CoverageInjector(null, coverageFilePath, guidCollector, filePath);
+            // Utilize a coverage injector object to inject coverage and then write the file back to the file system.
+            var rewriter = new CoverageInjector(sourceFilePath: filePath, coverageFileName: coverageFileName);
             var newRoot = rewriter.Visit(root);
-
             File.WriteAllText(filePath, newRoot.NormalizeWhitespace().ToFullString());
-            Console.WriteLine($"Injected logging into all methods in '{filePath}' using coverage file '{coverageFilePath}'.");
-
-            File.WriteAllLines(coverageFilePath, guidCollector);
-            Console.WriteLine($"Written {guidCollector.Count} GUIDs to '{coverageFilePath}'.");
         }
 
+        /// <summary>
+        /// Remove instrumentation data and delete existing coverage files.
+        /// </summary>
+        /// <param name="rootPath"></param>
+        /// <param name="additionalPaths"></param>
         public static void ResetInstrumentation(string rootPath, params string[] additionalPaths)
         {
             var pathsToProcess = new List<string>();
@@ -124,6 +110,7 @@ namespace SBFLApp
             int coverageFilesRemoved = 0;
             int coverageDirectoriesRemoved = 0;
 
+            // Go through all of the paths to clean up.
             foreach (var path in pathsToProcess)
             {
                 if (!Directory.Exists(path))
@@ -187,128 +174,6 @@ namespace SBFLApp
 
                 Console.WriteLine($"Written instrumented file to: {destFilePath}");
             }
-        }
-
-
-        // Detect and instrument test files within known test folders in the project path
-        public static void SpectrumTests(string projectPath)
-        {
-            var testFolders = DetectTestFolders(projectPath);
-            if (testFolders.Count == 0)
-            {
-                Console.WriteLine("No test folders detected.");
-                return;
-            }
-
-            foreach (var testFolder in testFolders)
-            {
-                Console.WriteLine($"Processing detected test folder: {testFolder}");
-
-                var testFiles = Directory.GetFiles(testFolder, "*.cs", SearchOption.AllDirectories);
-
-                foreach (var file in testFiles)
-                {
-                    Console.WriteLine($"Processing test file: {file}");
-
-                    var sourceCode = File.ReadAllText(file);
-                    var tree = CSharpSyntaxTree.ParseText(sourceCode);
-                    var root = tree.GetRoot();
-
-                    var classNodes = root.DescendantNodes().OfType<ClassDeclarationSyntax>().ToList();
-
-                    bool fileHasTestClassAttribute = false;
-                    var testMethodsInFile = new List<string>();
-
-                    foreach (var classNode in classNodes)
-                    {
-                        var hasTestClassAttribute = classNode.AttributeLists
-                            .SelectMany(a => a.Attributes)
-                            .Any(attr => IsTestClassAttribute(attr));
-
-                        if (hasTestClassAttribute)
-                        {
-                            fileHasTestClassAttribute = true;
-                            break;
-                        }
-
-                        foreach (var method in classNode.Members.OfType<MethodDeclarationSyntax>())
-                        {
-                            bool isTestMethod = method.AttributeLists
-                                .SelectMany(a => a.Attributes)
-                                .Any(attr => IsTestMethodAttribute(attr));
-
-                            if (isTestMethod)
-                            {
-                                testMethodsInFile.Add(method.Identifier.Text);
-                            }
-                        }
-                    }
-
-                    if (fileHasTestClassAttribute)
-                    {
-                        Console.WriteLine($"Injecting coverage for whole test class file: {file}");
-                        SpectrumAll(file);
-                    }
-                    else if (testMethodsInFile.Count > 0)
-                    {
-                        foreach (var methodName in testMethodsInFile)
-                        {
-                            Console.WriteLine($"Injecting coverage for test method '{methodName}' in file: {file}");
-                            SpectrumMethod(file, methodName);
-                        }
-                    }
-                    else
-                    {
-                        Console.WriteLine($"No test classes or test methods found in file: {file}");
-                    }
-                }
-            }
-        }
-
-        // Search for common test folder names under the project path and return matching directories
-        private static List<string> DetectTestFolders(string projectPath)
-        {
-            var commonTestFolderNames = new[]
-            {
-                "test", "tests", "unittest", "unittests", "spec", "specs", "integrationtests"
-            };
-
-            var foundTestFolders = new List<string>();
-
-            var allDirs = Directory.GetDirectories(projectPath, "*", SearchOption.AllDirectories);
-
-            foreach (var dir in allDirs)
-            {
-                var folderName = Path.GetFileName(dir).ToLowerInvariant();
-                if (commonTestFolderNames.Contains(folderName))
-                {
-                    foundTestFolders.Add(dir);
-                }
-            }
-
-            if (foundTestFolders.Count == 0)
-            {
-                var fallback = Path.Combine(projectPath, "Tests");
-                if (Directory.Exists(fallback))
-                    foundTestFolders.Add(fallback);
-            }
-
-            return foundTestFolders;
-        }
-
-        // Determine if an attribute indicates a test class (e.g., [TestClass], [TestFixture])
-        private static bool IsTestClassAttribute(AttributeSyntax attr)
-        {
-            var name = attr.Name.ToString();
-            return Regex.IsMatch(name, @"TestClass", RegexOptions.IgnoreCase) ||
-                   Regex.IsMatch(name, @"TestFixture", RegexOptions.IgnoreCase);
-        }
-
-        // Determine if an attribute indicates a test method (e.g., [TestMethod], [Fact], [Test])
-        private static bool IsTestMethodAttribute(AttributeSyntax attr)
-        {
-            var name = attr.Name.ToString();
-            return Regex.IsMatch(name, @"TestMethod|Fact|Test", RegexOptions.IgnoreCase);
         }
 
         private static int RemoveInstrumentationFromSource(string rootPath, CoverageCleanupRewriter rewriter)
