@@ -2,7 +2,7 @@
   "profiles": {
     "SBFLApp": {
       "commandName": "Project",
-      "commandLineArgs": "\"C:\\Repos\\CSharpFL\" MathApp.Tests --reset"
+      "commandLineArgs": "\"C:\\Repos\\CSharpFL\" MathApp.Tests MathApp --reset"
     }
   }
 }
