@@ -25,13 +25,6 @@ namespace SBFLApp
             string? testProjectFile = Directory.EnumerateFiles(arguments.TestProjectDirectory, "*.csproj", SearchOption.TopDirectoryOnly).FirstOrDefault();
             string testProjectPath = testProjectFile ?? arguments.TestProjectDirectory;
 
-            // If a reset was requested, we want to erase all instrumentation and coverage data to start fresh.
-            if (arguments.ResetRequested)
-            {
-                Console.WriteLine("Resetting existing instrumentation artifacts.");
-                Spectrum.ResetInstrumentation(arguments.SolutionDirectory, AppDomain.CurrentDomain.BaseDirectory);
-            }
-
             // Get a list of the tests in the test project directory.
             var discoveredTests = GetListOfTests(arguments.TestProjectDirectory);
 
@@ -43,7 +36,7 @@ namespace SBFLApp
                 return;
             }
 
-            EnsureProductionInstrumentation(productionSourceFiles, TemporaryCoverageFileName);
+            EnsureProductionInstrumentation(productionSourceFiles, TemporaryCoverageFileName, arguments.ResetRequested);
 
             // Run the tests and collect the pass/fail data.
             var testPassFailData = RunTests(discoveredTests, testProjectPath, arguments.VerboseRequested);
@@ -57,9 +50,21 @@ namespace SBFLApp
             rank.CalculateOp2();
             rank.CalculateJaccard();
 
+            if(arguments.CleanupRequested)
+            {
+                ConsoleLogger.Info("Cleaning up the instrumentation data.");
+                Spectrum.ResetInstrumentation(productionSourceFiles);
+                CleanupCoverageData();
+            }
+
             string csvOutputPath = Path.Combine(arguments.SolutionDirectory, "suspiciousness_report.csv");
             rank.WriteSuspiciousnessReport(csvOutputPath);
             ConsoleLogger.Info($"Suspiciousness scores written to {csvOutputPath}.");
+        }
+
+        private sealed record DiscoveredTest(string FilePath, string TypeDisplayName, string MethodName, string FullyQualifiedName)
+        {
+            public string CoverageFileStem => $"{TypeDisplayName}.{MethodName}";
         }
 
         /// <summary>
@@ -92,11 +97,6 @@ namespace SBFLApp
             }
 
             return discoveredTests;
-        }
-
-        private sealed record DiscoveredTest(string FilePath, string TypeDisplayName, string MethodName, string FullyQualifiedName)
-        {
-            public string CoverageFileStem => $"{TypeDisplayName}.{MethodName}";
         }
 
         /// <summary>
@@ -277,8 +277,15 @@ namespace SBFLApp
         /// </summary>
         /// <param name="sourceFiles">The files to ensure instrumentation is added to.</param>
         /// <returns>The list of files with instrumentation added.</returns>
-        private static void EnsureProductionInstrumentation(IReadOnlyList<string> sourceFiles, string? coverageFileName = null)
+        private static void EnsureProductionInstrumentation(IReadOnlyList<string> sourceFiles, string? coverageFileName = null, bool resetRequested = false)
         {
+            // If a reset was requested, we want to erase all instrumentation and coverage data to start fresh.
+            if (resetRequested)
+            {
+                Console.WriteLine("Resetting existing instrumentation artifacts.");
+                Spectrum.ResetInstrumentation(sourceFiles);
+            }
+
             foreach (var file in sourceFiles)
             {
                 try
@@ -469,44 +476,6 @@ namespace SBFLApp
             return false;
         }
 
-        private static bool ParseBooleanFlag(string value, string expectedName)
-        {
-            if (string.IsNullOrWhiteSpace(value))
-            {
-                return false;
-            }
-
-            if (bool.TryParse(value, out bool parsed))
-            {
-                return parsed;
-            }
-
-            if (string.Equals(value, "1", StringComparison.OrdinalIgnoreCase))
-            {
-                return true;
-            }
-
-            if (string.Equals(value, "0", StringComparison.OrdinalIgnoreCase))
-            {
-                return false;
-            }
-
-            if (string.Equals(expectedName, "reset flag", StringComparison.OrdinalIgnoreCase) &&
-                (string.Equals(value, "--reset", StringComparison.OrdinalIgnoreCase) || string.Equals(value, "-r", StringComparison.OrdinalIgnoreCase)))
-            {
-                return true;
-            }
-
-            if (string.Equals(expectedName, "verbose flag", StringComparison.OrdinalIgnoreCase) &&
-                (string.Equals(value, "--verbose", StringComparison.OrdinalIgnoreCase) || string.Equals(value, "-v", StringComparison.OrdinalIgnoreCase)))
-            {
-                return true;
-            }
-
-            ConsoleLogger.Warning($"Unrecognized value '{value}' for {expectedName}. Defaulting to 'false'.");
-            return false;
-        }
-
         private static bool RunTest(string testProjectPath, string fullyQualifiedTestName, bool verbose = false)
         {
             ConsoleLogger.Info($"Running {fullyQualifiedTestName}...");
@@ -569,6 +538,7 @@ namespace SBFLApp
             public string ProjectUnderTestDirectory { get; set; }
             public bool ResetRequested { get; set; }
             public bool VerboseRequested { get; set; }
+            public bool CleanupRequested {  get; set; }
 
             private CommandLineArguments()
             {
@@ -577,6 +547,7 @@ namespace SBFLApp
                 ProjectUnderTestDirectory = string.Empty;
                 ResetRequested = false;
                 VerboseRequested = false;
+                CleanupRequested = false;
             }
 
             public static CommandLineArguments? Parse(string[] args)
@@ -593,7 +564,8 @@ namespace SBFLApp
                 {
                     SolutionDirectory = args[0],
                     ResetRequested = args.Any(arg => string.Equals(arg, "--reset", StringComparison.OrdinalIgnoreCase) || string.Equals(arg, "-r", StringComparison.OrdinalIgnoreCase)),
-                    VerboseRequested = args.Any(arg => string.Equals(arg, "--verbose", StringComparison.OrdinalIgnoreCase) || string.Equals(arg, "-v", StringComparison.OrdinalIgnoreCase))
+                    VerboseRequested = args.Any(arg => string.Equals(arg, "--verbose", StringComparison.OrdinalIgnoreCase) || string.Equals(arg, "-v", StringComparison.OrdinalIgnoreCase)),
+                    CleanupRequested = args.Any(arg => string.Equals(arg, "--cleanup", StringComparison.OrdinalIgnoreCase) || string.Equals(arg, "-c", StringComparison.OrdinalIgnoreCase))
                 };
 
                 string testProjectName = args[1];

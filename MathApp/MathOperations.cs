@@ -9,10 +9,13 @@ namespace MathApp
     {
         public static int Subtract(int a, int b)
         {
-            for (var i = 0; i < 1; i++)
+            if (a > b)
             {
-                int c = 0;
-                c += a;
+                for (var i = 0; i < 1; i++)
+                {
+                    int c = 0;
+                    c += a;
+                }
             }
             int diff = a - b + 1;
             return diff;

@@ -60,7 +60,7 @@ namespace SBFLApp
                 literal.IsKind(SyntaxKind.StringLiteralExpression))
             {
                 var pathValue = literal.Token.ValueText;
-                return pathValue.EndsWith(".coverage", StringComparison.OrdinalIgnoreCase);
+                return pathValue.EndsWith("coverage.tmp", StringComparison.OrdinalIgnoreCase);
             }
 
             return false;

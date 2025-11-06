@@ -1,7 +1,6 @@
 ﻿using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
-using System.Text.RegularExpressions;
 
 namespace SBFLApp
 {
@@ -19,7 +18,7 @@ namespace SBFLApp
         {
             // Read in the source code that contains the method.
             var sourceCode = File.ReadAllText(filePath);
-            
+
             // Create an abstract syntax tree representation of the source code.
             var tree = CSharpSyntaxTree.ParseText(sourceCode);
             var root = tree.GetRoot();
@@ -80,59 +79,30 @@ namespace SBFLApp
         }
 
         /// <summary>
-        /// Remove instrumentation data and delete existing coverage files.
+        /// Remove instrumentation data from specified files.
         /// </summary>
-        /// <param name="rootPath"></param>
-        /// <param name="additionalPaths"></param>
-        public static void ResetInstrumentation(string rootPath, params string[] additionalPaths)
+        /// <param name="sourceFiles">The files to remove instrumentation from.</param>
+        public static void ResetInstrumentation(IReadOnlyList<string> sourceFiles)
         {
-            var pathsToProcess = new List<string>();
-
-            if (!string.IsNullOrWhiteSpace(rootPath))
-            {
-                pathsToProcess.Add(rootPath);
-            }
-
-            if (additionalPaths != null && additionalPaths.Length > 0)
-            {
-                pathsToProcess.AddRange(additionalPaths.Where(p => !string.IsNullOrWhiteSpace(p)));
-            }
-
-            if (pathsToProcess.Count == 0)
-            {
-                Console.WriteLine("No paths provided for instrumentation reset.");
-                return;
-            }
-
             var cleanupRewriter = new CoverageCleanupRewriter();
             var processedRoots = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             int sourceFilesCleaned = 0;
-            int coverageFilesRemoved = 0;
-            int coverageDirectoriesRemoved = 0;
 
             // Go through all of the paths to clean up.
-            foreach (var path in pathsToProcess)
+            foreach (var path in sourceFiles)
             {
-                if (!Directory.Exists(path))
+                if (!File.Exists(path))
                 {
-                    Console.WriteLine($"Reset skipped missing directory: {path}");
+                    Console.WriteLine($"Reset skipped missing file: {path}");
                     continue;
                 }
 
-                var normalizedPath = Path.GetFullPath(path);
-                if (!processedRoots.Add(normalizedPath))
-                {
-                    continue;
-                }
-
-                sourceFilesCleaned += RemoveInstrumentationFromSource(normalizedPath, cleanupRewriter);
-                coverageFilesRemoved += DeleteCoverageFiles(normalizedPath);
-                coverageDirectoriesRemoved += DeleteCoverageDirectories(normalizedPath);
+                sourceFilesCleaned += RemoveInstrumentationFromFile(path, cleanupRewriter) ? 1 : 0;
             }
 
             GuidMappingStore.Clear();
 
-            Console.WriteLine($"Instrumentation reset complete. Cleaned {sourceFilesCleaned} source files, removed {coverageFilesRemoved} coverage files, and deleted {coverageDirectoriesRemoved} coverage directories.");
+            Console.WriteLine($"Instrumentation reset complete. Cleaned {sourceFilesCleaned} source files.");
         }
 
         // Instrument every C# file in the project for coverage and save modified copies to a coverage folder
@@ -170,42 +140,29 @@ namespace SBFLApp
 
                 File.WriteAllText(destFilePath, newRoot.NormalizeWhitespace().ToFullString());
 
-                // Removed SpectrumAll(destFilePath) here to avoid double instrumentation
-
                 Console.WriteLine($"Written instrumented file to: {destFilePath}");
             }
         }
 
-        private static int RemoveInstrumentationFromSource(string rootPath, CoverageCleanupRewriter rewriter)
+        private static bool RemoveInstrumentationFromFile(string file, CoverageCleanupRewriter rewriter)
         {
-            var allCsFiles = Directory.GetFiles(rootPath, "*.cs", SearchOption.AllDirectories)
-                .Where(file => !IsInIgnoredDirectory(file))
-                .ToList();
 
-            int cleanedFiles = 0;
+            var originalText = File.ReadAllText(file);
+            var tree = CSharpSyntaxTree.ParseText(originalText);
+            var root = tree.GetRoot();
+            SyntaxNode? cleanedRoot = rewriter.Visit(root);
 
-            foreach (var file in allCsFiles)
+            if (cleanedRoot == null || SyntaxFactory.AreEquivalent(root, cleanedRoot))
             {
-                var originalText = File.ReadAllText(file);
-                var tree = CSharpSyntaxTree.ParseText(originalText);
-                var root = tree.GetRoot();
-                SyntaxNode? cleanedRoot = rewriter.Visit(root);
-
-                if (cleanedRoot == null || SyntaxFactory.AreEquivalent(root, cleanedRoot))
-                {
-                    continue;
-                }
-
-                var newText = cleanedRoot.ToFullString();
-                if (!string.Equals(originalText, newText, StringComparison.Ordinal))
-                {
-                    File.WriteAllText(file, newText);
-                }
-
-                cleanedFiles++;
+                return false;
             }
 
-            return cleanedFiles;
+            var newText = cleanedRoot.ToFullString();
+            if (!string.Equals(originalText, newText, StringComparison.Ordinal))
+            {
+                File.WriteAllText(file, newText);
+            }
+            return true;
         }
 
         private static bool IsInIgnoredDirectory(string filePath)
@@ -215,70 +172,6 @@ namespace SBFLApp
                    normalizedPath.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase) ||
                    normalizedPath.Contains($"{Path.DirectorySeparatorChar}coverage{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase) ||
                    normalizedPath.Contains($".coverage{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase);
-        }
-
-        private static int DeleteCoverageFiles(string rootPath)
-        {
-            var coverageFiles = Directory.GetFiles(rootPath, "*.coverage", SearchOption.AllDirectories);
-            int deletedCount = 0;
-
-            foreach (var file in coverageFiles)
-            {
-                try
-                {
-                    File.Delete(file);
-                    deletedCount++;
-                }
-                catch (IOException ex)
-                {
-                    Console.WriteLine($"Failed to delete coverage file '{file}': {ex.Message}");
-                }
-                catch (UnauthorizedAccessException ex)
-                {
-                    Console.WriteLine($"Failed to delete coverage file '{file}': {ex.Message}");
-                }
-            }
-
-            return deletedCount;
-        }
-
-        private static int DeleteCoverageDirectories(string rootPath)
-        {
-            var directories = Directory.GetDirectories(rootPath, "*.coverage", SearchOption.AllDirectories)
-                .Concat(Directory.GetDirectories(rootPath, "coverage", SearchOption.AllDirectories))
-                .ToList();
-
-            int deletedCount = 0;
-            var processed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-            foreach (var dir in directories)
-            {
-                if (!processed.Add(dir))
-                {
-                    continue;
-                }
-
-                if (!Directory.Exists(dir))
-                {
-                    continue;
-                }
-
-                try
-                {
-                    Directory.Delete(dir, true);
-                    deletedCount++;
-                }
-                catch (IOException ex)
-                {
-                    Console.WriteLine($"Failed to delete coverage directory '{dir}': {ex.Message}");
-                }
-                catch (UnauthorizedAccessException ex)
-                {
-                    Console.WriteLine($"Failed to delete coverage directory '{dir}': {ex.Message}");
-                }
-            }
-
-            return deletedCount;
         }
     }
 }
