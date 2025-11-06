@@ -23,10 +23,10 @@ dotnet build
 ```
 
 ## Running the sample
-`SBFLApp` accepts the solution directory, the test project name, the project under test, and boolean values that control whether instrumentation should be reset and whether detailed test output is displayed. It instruments the discovered tests in place, executes them, aggregates the coverage data, and ranks statements by suspiciousness. Run the utility from the repository root:
+`SBFLApp` accepts the solution directory, the test project name, the project under test, and optional boolean flags that control whether instrumentation should be reset and whether detailed test output is displayed. It instruments the discovered tests in place, executes them, aggregates the coverage data, and ranks statements by suspiciousness. Run the utility from the repository root:
 
 ```bash
-dotnet run --project SBFLApp/SBFLApp.csproj . MathApp.Tests MathApp false false
+dotnet run --project SBFLApp/SBFLApp.csproj . MathApp.Tests MathApp
 ```
 
 Key behaviours:
@@ -34,13 +34,13 @@ Key behaviours:
 - Coverage GUIDs are written to `<FullyQualifiedTestName>.coverage` files located alongside the compiled test binaries (for example under `MathApp.Tests/bin/Debug/net8.0`).
 - Once the run finishes, `suspiciousness_report.csv` is written to the provided solution directory.
 
-To discard instrumentation and delete generated coverage artifacts, set the reset flag to `true`:
+To discard instrumentation and delete generated coverage artifacts, provide the optional reset flag:
 
 ```bash
-dotnet run --project SBFLApp/SBFLApp.csproj . MathApp.Tests MathApp true false
+dotnet run --project SBFLApp/SBFLApp.csproj . MathApp.Tests MathApp --reset
 ```
 
-This cleans modified test sources, removes coverage files, and clears cached GUID mappings. Use `true` for the final argument to stream the test output for each execution when additional verbosity is desired.
+This cleans modified test sources, removes coverage files, and clears cached GUID mappings. Use `--verbose` (or pass `true` for the final argument) to stream the test output for each execution when additional verbosity is desired.
 
 ## Running the test suite
 The repository includes traditional unit tests as well as instrumentation hooks. Execute all tests with:

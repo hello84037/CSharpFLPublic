@@ -7,13 +7,15 @@ namespace SBFLApp
 {
     class Program
     {
+        private const string TemporaryCoverageFileName = "__sbfl_current_test.coverage.tmp";
+
         static void Main(string[] args)
         {
             LogMessage("Running the Spectrum Based Fault Localizer Application\n");
 
             if (args.Length < 3)
             {
-                LogWarning("Usage: dotnet run <solutionDirectory> <testProjectName> <projectUnderTestName> [--reset (-r)] [--verbose (-v)]");
+                LogWarning("Usage: dotnet run <solutionDirectory> <testProjectName> <projectUnderTestName> [resetFlag] [verboseFlag]");
                 return;
             }
 
@@ -21,8 +23,14 @@ namespace SBFLApp
             string solutionDirectory = args[0];
             string testProjectName = args[1];
             string projectUnderTestName = args[2];
-            bool resetRequested = args.Any(arg => string.Equals(arg, "--reset", StringComparison.OrdinalIgnoreCase) || string.Equals(arg, "-r", StringComparison.OrdinalIgnoreCase));
-            bool verboseRequested = args.Any(arg => string.Equals(arg, "--verbose", StringComparison.OrdinalIgnoreCase) || string.Equals(arg, "-v", StringComparison.OrdinalIgnoreCase));
+            bool resetRequested = args.Length > 3 ? ParseBooleanFlag(args[3], expectedName: "reset flag") : false;
+            bool verboseRequested = args.Length > 4 ? ParseBooleanFlag(args[4], expectedName: "verbose flag") : false;
+
+            if (args.Length > 5)
+            {
+                var extras = string.Join(", ", args.Skip(5));
+                LogWarning($"Ignoring extra arguments: {extras}");
+            }
 
             // Verify the solution directory to be tested exists.
             if (!Directory.Exists(solutionDirectory))
@@ -87,7 +95,14 @@ namespace SBFLApp
 
             // Create a dictionary for storing the test and the pass/fail status
             var testPassFail = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
-            SetInjection(productionSourceFiles, discoveredTests, testProjectPath, ref testPassFail, verboseRequested);
+            SetInjection(
+                productionSourceFiles,
+                discoveredTests,
+                testProjectPath,
+                testProjectDirectory,
+                solutionDirectory,
+                ref testPassFail,
+                verboseRequested);
 
             var testCoverage = BuildTestCoverage(
                 discoveredTests,
@@ -108,7 +123,7 @@ namespace SBFLApp
 
         private sealed record DiscoveredTest(string FilePath, string TypeDisplayName, string MethodName, string FullyQualifiedName)
         {
-            public string CoverageFileStem => FullyQualifiedName;
+            public string CoverageFileStem => $"{TypeDisplayName}.{MethodName}";
         }
 
         /// <summary>
@@ -179,31 +194,8 @@ namespace SBFLApp
         {
             var coverage = new Dictionary<string, ISet<string>>(StringComparer.OrdinalIgnoreCase);
 
-            // List the directories to look for coverage data.
-            var candidateRoots = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-            {
-                Directory.GetCurrentDirectory(),
-                AppDomain.CurrentDomain.BaseDirectory,
-                solutionDirectory,
-                testProjectDirectory
-            };
-
-            var binDirectory = Path.Combine(testProjectDirectory, "bin");
-            var binCoverageFiles = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-
-            if (Directory.Exists(binDirectory))
-            {
-                foreach (var path in Directory.EnumerateFiles(binDirectory, "*.coverage", SearchOption.AllDirectories))
-                {
-                    var fileName = Path.GetFileName(path);
-                    binCoverageFiles[fileName] = path;
-                }
-
-                foreach (var directory in Directory.EnumerateDirectories(binDirectory, "*", SearchOption.AllDirectories))
-                {
-                    candidateRoots.Add(directory);
-                }
-            }
+            var candidateRoots = BuildCoverageCandidateRoots(solutionDirectory, testProjectDirectory);
+            var binCoverageFiles = IndexCoverageFiles(Path.Combine(testProjectDirectory, "bin"), "*.coverage");
 
             foreach (var test in tests)
             {
@@ -300,12 +292,16 @@ namespace SBFLApp
         /// <param name="sourceFiles">The production source files targeted for instrumentation.</param>
         /// <param name="tests">The <see cref="DiscoveredTest"/> instances to execute.</param>
         /// <param name="testProjectPath">The path to the test csproj file.</param>
+        /// <param name="testProjectDirectory">The directory containing the test project.</param>
+        /// <param name="solutionDirectory">The root directory of the solution.</param>
         /// <param name="verbose">If verbose is requested, the test output will be displayed.</param>
         /// <param name="testPassFail">A dictionary to store the test and test result.</param>
         private static void SetInjection(
             in IReadOnlyList<string> sourceFiles,
             in IReadOnlyList<DiscoveredTest> tests,
             in string testProjectPath,
+            in string testProjectDirectory,
+            in string solutionDirectory,
             ref Dictionary<string, bool> testPassFail,
             in bool verbose = false)
         {
@@ -313,20 +309,28 @@ namespace SBFLApp
 
             var instrumentedFiles = EnsureProductionInstrumentation(sourceFiles);
 
+            foreach (var file in instrumentedFiles)
+            {
+                UpdateCoverageFileTarget(file, TemporaryCoverageFileName);
+            }
+
+            var coverageRoots = BuildCoverageCandidateRoots(solutionDirectory, testProjectDirectory);
+
             foreach (var test in tests)
             {
                 // Get the coverage filename and delete if there is an existing one.
                 string coverageFileName = $"{test.CoverageFileStem}.coverage";
-                DeleteCoverageFile(coverageFileName);
-
-                foreach (var file in instrumentedFiles)
-                {
-                    UpdateCoverageFileTarget(file, coverageFileName);
-                }
+                DeleteCoverageFile(coverageFileName, coverageRoots);
+                DeleteCoverageFile(TemporaryCoverageFileName, coverageRoots);
 
                 // Run the test silently
                 bool passed = RunTest(testProjectPath, test.FullyQualifiedName, verbose);
                 testPassFail[test.CoverageFileStem] = passed;
+
+                if (!TryPromoteTemporaryCoverageFile(TemporaryCoverageFileName, coverageFileName, coverageRoots))
+                {
+                    LogError($"Coverage data not found or could not be saved for test: {test.FullyQualifiedName}");
+                }
             }
         }
 
@@ -386,29 +390,55 @@ namespace SBFLApp
             return sourceCode.Contains("System.IO.File.AppendAllText", StringComparison.Ordinal);
         }
 
-        private static void DeleteCoverageFile(string coverageFileName)
+        private static void DeleteCoverageFile(string coverageFileName, IEnumerable<string>? candidateRoots = null)
+        {
+            if (string.IsNullOrWhiteSpace(coverageFileName))
+            {
+                return;
+            }
+
+            if (Path.IsPathRooted(coverageFileName))
+            {
+                TryDeleteFile(coverageFileName);
+                return;
+            }
+
+            var roots = candidateRoots ?? new[]
+            {
+                Directory.GetCurrentDirectory(),
+                AppDomain.CurrentDomain.BaseDirectory
+            };
+
+            var processed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var root in roots)
+            {
+                if (string.IsNullOrWhiteSpace(root) || !processed.Add(root))
+                {
+                    continue;
+                }
+
+                var candidatePath = Path.Combine(root, coverageFileName);
+                TryDeleteFile(candidatePath);
+            }
+        }
+
+        private static void TryDeleteFile(string filePath)
         {
             try
             {
-                if (File.Exists(coverageFileName))
+                if (File.Exists(filePath))
                 {
-                    File.Delete(coverageFileName);
-                }
-
-                var binPath = AppDomain.CurrentDomain.BaseDirectory;
-                var fullPath = Path.Combine(binPath, coverageFileName);
-                if (File.Exists(fullPath))
-                {
-                    File.Delete(fullPath);
+                    File.Delete(filePath);
                 }
             }
             catch (IOException ex)
             {
-                Console.WriteLine($"Failed to delete coverage file '{coverageFileName}': {ex.Message}");
+                Console.WriteLine($"Failed to delete coverage file '{filePath}': {ex.Message}");
             }
             catch (UnauthorizedAccessException ex)
             {
-                Console.WriteLine($"Failed to delete coverage file '{coverageFileName}': {ex.Message}");
+                Console.WriteLine($"Failed to delete coverage file '{filePath}': {ex.Message}");
             }
         }
 
@@ -462,6 +492,96 @@ namespace SBFLApp
             }
 
             return files;
+        }
+
+        private static HashSet<string> BuildCoverageCandidateRoots(string solutionDirectory, string testProjectDirectory)
+        {
+            var candidateRoots = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                Directory.GetCurrentDirectory(),
+                AppDomain.CurrentDomain.BaseDirectory,
+                solutionDirectory,
+                testProjectDirectory
+            };
+
+            var binDirectory = Path.Combine(testProjectDirectory, "bin");
+            if (Directory.Exists(binDirectory))
+            {
+                candidateRoots.Add(binDirectory);
+
+                foreach (var directory in Directory.EnumerateDirectories(binDirectory, "*", SearchOption.AllDirectories))
+                {
+                    candidateRoots.Add(directory);
+                }
+            }
+
+            return candidateRoots;
+        }
+
+        private static Dictionary<string, string> IndexCoverageFiles(string rootDirectory, string searchPattern)
+        {
+            var files = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+            if (!Directory.Exists(rootDirectory))
+            {
+                return files;
+            }
+
+            foreach (var path in Directory.EnumerateFiles(rootDirectory, searchPattern, SearchOption.AllDirectories))
+            {
+                var fileName = Path.GetFileName(path);
+                files[fileName] = path;
+            }
+
+            return files;
+        }
+
+        private static bool TryPromoteTemporaryCoverageFile(
+            string temporaryCoverageFileName,
+            string finalCoverageFileName,
+            IReadOnlyCollection<string> candidateRoots)
+        {
+            foreach (var root in candidateRoots)
+            {
+                if (string.IsNullOrWhiteSpace(root))
+                {
+                    continue;
+                }
+
+                var tempPath = Path.IsPathRooted(temporaryCoverageFileName)
+                    ? temporaryCoverageFileName
+                    : Path.Combine(root, temporaryCoverageFileName);
+
+                if (!File.Exists(tempPath))
+                {
+                    continue;
+                }
+
+                var finalPath = Path.IsPathRooted(finalCoverageFileName)
+                    ? finalCoverageFileName
+                    : Path.Combine(root, finalCoverageFileName);
+
+                try
+                {
+                    if (File.Exists(finalPath))
+                    {
+                        File.Delete(finalPath);
+                    }
+
+                    File.Move(tempPath, finalPath);
+                    return true;
+                }
+                catch (IOException ex)
+                {
+                    Console.WriteLine($"Failed to move coverage file '{tempPath}' to '{finalPath}': {ex.Message}");
+                }
+                catch (UnauthorizedAccessException ex)
+                {
+                    Console.WriteLine($"Failed to move coverage file '{tempPath}' to '{finalPath}': {ex.Message}");
+                }
+            }
+
+            return false;
         }
 
         private static bool ShouldSkipProjectFile(string filePath)
