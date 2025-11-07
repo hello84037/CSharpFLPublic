@@ -56,6 +56,7 @@ namespace SBFLApp
             // Write the modified file back to the file system.
             var newRoot = rewrittenRoot;
             File.WriteAllText(filePath, newRoot.NormalizeWhitespace().ToFullString());
+            GuidMappingStore.Flush();
             Console.WriteLine($"Injected logging into all statements in '{methodName}' in '{filePath}'.");
         }
 
@@ -76,6 +77,7 @@ namespace SBFLApp
             var rewriter = new CoverageInjector(sourceFilePath: filePath, coverageFileName: coverageFileName);
             var newRoot = rewriter.Visit(root);
             File.WriteAllText(filePath, newRoot.NormalizeWhitespace().ToFullString());
+            GuidMappingStore.Flush();
         }
 
         /// <summary>
@@ -141,6 +143,7 @@ namespace SBFLApp
                 File.WriteAllText(destFilePath, newRoot.NormalizeWhitespace().ToFullString());
 
                 Console.WriteLine($"Written instrumented file to: {destFilePath}");
+                GuidMappingStore.Flush();
             }
         }
 
