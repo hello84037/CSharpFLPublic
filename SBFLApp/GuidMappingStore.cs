@@ -12,7 +12,7 @@ namespace SBFLApp
             {
                 return string.IsNullOrWhiteSpace(SourceFile)
                     ? MethodName
-                    : $"{MethodName} ({SourceFile})";
+                    : $"({SourceFile}) {MethodName}";
             }
         }
 

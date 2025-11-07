@@ -54,10 +54,10 @@ namespace SBFLApp
             {
                 ConsoleLogger.Info("Cleaning up the instrumentation data.");
                 Spectrum.ResetInstrumentation(productionSourceFiles);
-                CleanupCoverageData();
+                CleanupCoverageData(CoverageDirectory);
             }
 
-            string csvOutputPath = Path.Combine(arguments.SolutionDirectory, "suspiciousness_report.csv");
+            string csvOutputPath = Path.Combine(Directory.GetCurrentDirectory(), "suspiciousness_report.csv");
             rank.WriteSuspiciousnessReport(csvOutputPath);
             ConsoleLogger.Info($"Suspiciousness scores written to {csvOutputPath}.");
         }
@@ -250,7 +250,8 @@ namespace SBFLApp
 
             var testPassFailData = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
 
-            CleanupCoverageData();
+            CleanupCoverageData(CoverageDirectory);
+            Directory.CreateDirectory(CoverageDirectory);
 
             foreach (var test in tests)
             {
@@ -354,23 +355,17 @@ namespace SBFLApp
             }
         }
 
-        private static void CleanupCoverageData()
+        private static void CleanupCoverageData(string coverageDirectory)
         {
             try
             {
-                if (Directory.Exists(CoverageDirectory))
+                if (Directory.Exists(coverageDirectory))
                 {
-                    foreach (string file in Directory.EnumerateFiles(CoverageDirectory))
+                    foreach (string file in Directory.EnumerateFiles(coverageDirectory))
                     {
                         File.Delete(file);
                     }
-                    Directory.Delete(CoverageDirectory, true);
                 }
-                else
-                {
-                    Directory.CreateDirectory(CoverageDirectory);
-                }
-
             }
             catch (Exception ex)
             {
@@ -554,7 +549,7 @@ namespace SBFLApp
             {
                 if (args.Length < 3)
                 {
-                    ConsoleLogger.Warning("Usage: dotnet run <solutionDirectory> <testProjectName> <projectUnderTestName> [resetFlag] [verboseFlag]");
+                    ConsoleLogger.Warning("Usage: dotnet run <solutionDirectory> <testProjectName> <projectUnderTestName> [--reset (-r)] [--verbose (-v)] [--cleaup (-c) ");
                     return null;
                 }
 

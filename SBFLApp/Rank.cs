@@ -252,7 +252,7 @@ namespace SBFLApp
 
             foreach (var entry in orderedStatements)
             {
-                var values = new List<string> { Escape(entry.Display) };
+                var values = new List<string> { Escape($"{entry.Display}.{entry.Statement}") };
                 values.AddRange(calculatedColumns.Select(column => FormatRank(column.Ranks, entry.Statement)));
 
                 writer.WriteLine(string.Join(",", values));
