@@ -253,6 +253,12 @@ namespace SBFLApp
             CleanupCoverageData(CoverageDirectory);
             Directory.CreateDirectory(CoverageDirectory);
 
+            if (!BuildTestProject(testProjectPath, verbose))
+            {
+                ConsoleLogger.Error("Unable to build test project. Aborting test run.");
+                return testPassFailData;
+            }
+
             foreach (var test in tests)
             {
                 // Get the coverage filename.
@@ -471,6 +477,67 @@ namespace SBFLApp
             return false;
         }
 
+        private static bool BuildTestProject(string testProjectPath, bool verbose)
+        {
+            ConsoleLogger.Info($"Building {testProjectPath}...");
+
+            try
+            {
+                var startInfo = new ProcessStartInfo("dotnet")
+                {
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                };
+
+                startInfo.ArgumentList.Add("build");
+                startInfo.ArgumentList.Add(testProjectPath);
+                startInfo.ArgumentList.Add("--nologo");
+
+                using Process? process = Process.Start(startInfo);
+                if (process is null)
+                {
+                    ConsoleLogger.Error("Failed to start build process.");
+                    return false;
+                }
+
+                string output = process.StandardOutput.ReadToEnd();
+                string error = process.StandardError.ReadToEnd();
+                process.WaitForExit();
+
+                if (verbose && !string.IsNullOrEmpty(output))
+                {
+                    Console.WriteLine(output);
+                }
+
+                bool failed = process.ExitCode != 0;
+
+                if (!string.IsNullOrEmpty(error) && (verbose || failed))
+                {
+                    ConsoleLogger.Warning(error);
+                }
+
+                if (failed && !string.IsNullOrEmpty(output) && !verbose)
+                {
+                    Console.WriteLine(output);
+                }
+
+                if (failed)
+                {
+                    ConsoleLogger.Error("dotnet build failed.");
+                    return false;
+                }
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                ConsoleLogger.Error($"Failed to build test project: {ex.Message}");
+                return false;
+            }
+        }
+
         private static bool RunTest(string testProjectPath, string fullyQualifiedTestName, bool verbose = false)
         {
             ConsoleLogger.Info($"Running {fullyQualifiedTestName}...");
@@ -478,16 +545,20 @@ namespace SBFLApp
             {
                 string filter = $"FullyQualifiedName~{fullyQualifiedTestName}";
 
-                var startInfo = new ProcessStartInfo(
-                    "dotnet",
-                    $"test {testProjectPath} --filter {filter}"
-                )
+                var startInfo = new ProcessStartInfo("dotnet")
                 {
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
                     UseShellExecute = false,
                     CreateNoWindow = true,
                 };
+
+                startInfo.ArgumentList.Add("test");
+                startInfo.ArgumentList.Add(testProjectPath);
+                startInfo.ArgumentList.Add("--filter");
+                startInfo.ArgumentList.Add(filter);
+                startInfo.ArgumentList.Add("--no-build");
+                startInfo.ArgumentList.Add("--nologo");
 
                 using Process? process = Process.Start(startInfo);
                 if (process is null)
