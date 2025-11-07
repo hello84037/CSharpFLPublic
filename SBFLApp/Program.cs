@@ -2,6 +2,7 @@
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using System.Diagnostics;
+using System.Text;
 
 namespace SBFLApp
 {
@@ -402,8 +403,14 @@ namespace SBFLApp
             }
 
             // Write the file back to save the changes.
-            File.WriteAllText(filePath, rewrittenRoot.NormalizeWhitespace().ToFullString());
-            Thread.Sleep(1000);
+            var rewrittenText = rewrittenRoot.NormalizeWhitespace().ToFullString();
+            using (var stream = new FileStream(filePath, FileMode.Create, FileAccess.Write, FileShare.None))
+            {
+                using var writer = new StreamWriter(stream, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+                writer.Write(rewrittenText);
+                writer.Flush();
+                stream.Flush(true);
+            }
 
             // Reload the code that was just written, and return the new root.
             var reloadedCode = File.ReadAllText(filePath);
