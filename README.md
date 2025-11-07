@@ -8,7 +8,7 @@ CSharpFL is a sample C# solution that demonstrates automated spectrum-based faul
 - **SBFLApp/** – Console application that performs the SBFL workflow.
   - `Program.cs` discovers test methods, keeps instrumentation in sync, coordinates per-test execution, and manages coverage artifacts in a dedicated working folder.
   - `Spectrum.cs` and `LogStatementRewriter.cs` contain the Roslyn rewriters that add and clean up logging statements.
-  - `Rank.cs` calculates suspiciousness scores using the Tarantula, Ochiai, D*, Op2, and Jaccard formulas and exports the values to CSV.
+  - `Rank.cs` calculates suspiciousness scores using the Tarantula, Ochiai, D*, Op2, and Jaccard formulas and exports the values to CSV or Markdown.
 - **MathApp.sln** – Solution file tying the application and test project together.
 
 ## Prerequisites
@@ -32,7 +32,12 @@ dotnet run --project SBFLApp/SBFLApp.csproj . MathApp.Tests MathApp
 Key behaviours:
 - Test files are rewritten on disk during instrumentation. The tool removes previous instrumentation when rerun and updates the injected logging if necessary.
 - Coverage GUIDs are written to `<FullyQualifiedTestName>.coverage` files inside a `Coverage/` directory created next to the running application. Each test first logs to `__sbfl_current_test.coverage.tmp` and the file is promoted when the run finishes so stale data is never mixed with new results.
-- Once the run finishes, `suspiciousness_report.csv` is written to the provided solution directory.
+- Once the run finishes, a `suspiciousness_report.csv` file is written to the provided solution directory. Use the optional flags below to tailor the output:
+
+  - `--top <count>` (or `-t`) limits the report to the highest-suspicion statements.
+  - `--report-format <csv|markdown>` switches between CSV and Markdown export formats.
+  - `--report-path <file>` writes the report to a custom location.
+  - `--summary` (or `-s`) prints the top results to the console (defaults to 10 when `--top` is omitted).
 
 To discard instrumentation and delete generated coverage artifacts, provide the optional reset flag:
 
