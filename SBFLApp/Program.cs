@@ -2,12 +2,14 @@
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using System.Diagnostics;
+using System.Globalization;
 using System.Text;
 
 namespace SBFLApp
 {
     class Program
     {
+        private const int DefaultSummaryCount = 10;
         private static readonly string CoverageDirectory = Path.Combine(Directory.GetCurrentDirectory(), "Coverage");
         private static readonly string TemporaryCoverageFileName = Path.Combine(CoverageDirectory, "__sbfl_current_test.coverage.tmp");
 
@@ -58,9 +60,31 @@ namespace SBFLApp
                 CleanupCoverageData(CoverageDirectory);
             }
 
-            string csvOutputPath = Path.Combine(Directory.GetCurrentDirectory(), "suspiciousness_report.csv");
-            rank.WriteSuspiciousnessReport(csvOutputPath);
-            ConsoleLogger.Info($"Suspiciousness scores written to {csvOutputPath}.");
+            var reportSnapshot = rank.CreateReportSnapshot(arguments.TopResults);
+
+            string defaultReportFileName = arguments.ReportFormat == Rank.SuspiciousnessReportFormat.Markdown
+                ? "suspiciousness_report.md"
+                : "suspiciousness_report.csv";
+
+            string reportPath = arguments.ReportPath ?? Path.Combine(Directory.GetCurrentDirectory(), defaultReportFileName);
+            if (!Path.IsPathRooted(reportPath))
+            {
+                reportPath = Path.GetFullPath(Path.Combine(Directory.GetCurrentDirectory(), reportPath));
+            }
+
+            rank.WriteSuspiciousnessReport(reportPath, reportSnapshot, arguments.ReportFormat);
+
+            string formatLabel = arguments.ReportFormat.ToString().ToLowerInvariant();
+            ConsoleLogger.Info($"Suspiciousness scores written to {reportPath} ({formatLabel}).");
+
+            if (arguments.SummaryRequested)
+            {
+                var summarySnapshot = arguments.TopResults.HasValue
+                    ? reportSnapshot
+                    : rank.CreateReportSnapshot(DefaultSummaryCount);
+
+                PrintConsoleSummary(summarySnapshot, arguments.TopResults ?? DefaultSummaryCount);
+            }
         }
 
         private sealed record DiscoveredTest(string FilePath, string TypeDisplayName, string MethodName, string FullyQualifiedName)
@@ -604,6 +628,53 @@ namespace SBFLApp
             }
         }
 
+        private static void PrintConsoleSummary(Rank.SuspiciousnessReportSnapshot snapshot, int requestedCount)
+        {
+            if (snapshot.Rows.Count == 0)
+            {
+                ConsoleLogger.Warning("No suspiciousness data available to summarize.");
+                return;
+            }
+
+            int displayedCount = snapshot.Rows.Count;
+            ConsoleLogger.Info($"Top {Math.Min(requestedCount, displayedCount)} suspicious statements:");
+
+            foreach (var row in snapshot.Rows)
+            {
+                var statementLabel = $"{row.DisplayName}.{row.StatementId}";
+
+                if (snapshot.Metrics.Count == 0)
+                {
+                    Console.WriteLine($" - {statementLabel}");
+                    continue;
+                }
+
+                var metricsSummary = snapshot.Metrics
+                    .Select(metric =>
+                    {
+                        bool hasValue = row.Scores.TryGetValue(metric, out float value);
+                        return $"{metric}: {FormatSuspiciousness(hasValue ? value : null)}";
+                    });
+
+                Console.WriteLine($" - {statementLabel} => {string.Join(", ", metricsSummary)}");
+            }
+        }
+
+        private static string FormatSuspiciousness(float? value)
+        {
+            if (!value.HasValue)
+            {
+                return "-";
+            }
+
+            if (float.IsPositiveInfinity(value.Value))
+            {
+                return "Infinity";
+            }
+
+            return value.Value.ToString("F6", CultureInfo.InvariantCulture);
+        }
+
         private class CommandLineArguments
         {
             public string SolutionDirectory { get; set; }
@@ -612,6 +683,10 @@ namespace SBFLApp
             public bool ResetRequested { get; set; }
             public bool VerboseRequested { get; set; }
             public bool CleanupRequested {  get; set; }
+            public int? TopResults { get; set; }
+            public Rank.SuspiciousnessReportFormat ReportFormat { get; set; }
+            public string? ReportPath { get; set; }
+            public bool SummaryRequested { get; set; }
 
             private CommandLineArguments()
             {
@@ -621,13 +696,17 @@ namespace SBFLApp
                 ResetRequested = false;
                 VerboseRequested = false;
                 CleanupRequested = false;
+                TopResults = null;
+                ReportFormat = Rank.SuspiciousnessReportFormat.Csv;
+                ReportPath = null;
+                SummaryRequested = false;
             }
 
             public static CommandLineArguments? Parse(string[] args)
             {
                 if (args.Length < 3)
                 {
-                    ConsoleLogger.Warning("Usage: dotnet run <solutionDirectory> <testProjectName> <projectUnderTestName> [--reset (-r)] [--verbose (-v)] [--cleaup (-c) ");
+                    ConsoleLogger.Warning("Usage: dotnet run <solutionDirectory> <testProjectName> <projectUnderTestName> [--reset (-r)] [--verbose (-v)] [--cleanup (-c)] [--top <count> (-t <count>)] [--report-format <csv|markdown>] [--report-path <file>] [--summary (-s)]");
                     return null;
                 }
 
@@ -635,19 +714,15 @@ namespace SBFLApp
                 // Parse the given commandline arguments.
                 CommandLineArguments arguments = new()
                 {
-                    SolutionDirectory = args[0],
-                    ResetRequested = args.Any(arg => string.Equals(arg, "--reset", StringComparison.OrdinalIgnoreCase) || string.Equals(arg, "-r", StringComparison.OrdinalIgnoreCase)),
-                    VerboseRequested = args.Any(arg => string.Equals(arg, "--verbose", StringComparison.OrdinalIgnoreCase) || string.Equals(arg, "-v", StringComparison.OrdinalIgnoreCase)),
-                    CleanupRequested = args.Any(arg => string.Equals(arg, "--cleanup", StringComparison.OrdinalIgnoreCase) || string.Equals(arg, "-c", StringComparison.OrdinalIgnoreCase))
+                    SolutionDirectory = args[0]
                 };
 
                 string testProjectName = args[1];
                 string projectUnderTestName = args[2];
 
-                if (args.Length > 5)
+                if (!ParseOptionalArguments(args.Skip(3), arguments))
                 {
-                    var extras = string.Join(", ", args.Skip(5));
-                    ConsoleLogger.Warning($"Ignoring extra arguments: {extras}");
+                    return null;
                 }
 
                 // Verify the solution directory to be tested exists.
@@ -674,6 +749,203 @@ namespace SBFLApp
                 }
 
                 return arguments;
+            }
+
+            private static bool ParseOptionalArguments(IEnumerable<string> optionalArgs, CommandLineArguments arguments)
+            {
+                Queue<string> queue = new(optionalArgs);
+
+                while (queue.Count > 0)
+                {
+                    string option = queue.Dequeue();
+
+                    switch (option)
+                    {
+                        case "--reset":
+                        case "-r":
+                            arguments.ResetRequested = true;
+                            break;
+                        case "--verbose":
+                        case "-v":
+                            arguments.VerboseRequested = true;
+                            break;
+                        case "--cleanup":
+                        case "-c":
+                            arguments.CleanupRequested = true;
+                            break;
+                        case "--summary":
+                        case "-s":
+                            arguments.SummaryRequested = true;
+                            break;
+                        case "--top":
+                        case "-t":
+                            if (!TryConsumeTopValue(queue, out int topCount))
+                            {
+                                return false;
+                            }
+
+                            arguments.TopResults = topCount;
+                            break;
+                        case "--report-format":
+                            if (!TryConsumeFormatValue(queue, out var format))
+                            {
+                                return false;
+                            }
+
+                            arguments.ReportFormat = format;
+                            break;
+                        case "--report-path":
+                            if (!TryConsumePathValue(queue, out var path))
+                            {
+                                return false;
+                            }
+
+                            arguments.ReportPath = path;
+                            break;
+                        default:
+                            bool? handled = HandleCompoundOption(option, arguments);
+                            if (handled == false)
+                            {
+                                return false;
+                            }
+
+                            if (handled == null)
+                            {
+                                ConsoleLogger.Warning($"Ignoring unrecognized argument: {option}");
+                            }
+
+                            break;
+                    }
+                }
+
+                return true;
+            }
+
+            private static bool? HandleCompoundOption(string option, CommandLineArguments arguments)
+            {
+                if (option.StartsWith("--top=", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (TryParseTop(option[(option.IndexOf('=') + 1)..], out int topValue))
+                    {
+                        arguments.TopResults = topValue;
+                    }
+                    else
+                    {
+                        return false;
+                    }
+
+                    return true;
+                }
+
+                if (option.StartsWith("--report-format=", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (TryParseFormat(option[(option.IndexOf('=') + 1)..], out var formatValue))
+                    {
+                        arguments.ReportFormat = formatValue;
+                    }
+                    else
+                    {
+                        return false;
+                    }
+
+                    return true;
+                }
+
+                if (option.StartsWith("--report-path=", StringComparison.OrdinalIgnoreCase))
+                {
+                    string value = option[(option.IndexOf('=') + 1)..];
+                    if (!string.IsNullOrWhiteSpace(value))
+                    {
+                        arguments.ReportPath = value;
+                    }
+                    else
+                    {
+                        ConsoleLogger.Error("Invalid value for --report-path option.");
+                        return false;
+                    }
+
+                    return true;
+                }
+
+                return null;
+            }
+
+            private static bool TryConsumeTopValue(Queue<string> queue, out int topCount)
+            {
+                topCount = 0;
+
+                if (queue.Count == 0)
+                {
+                    ConsoleLogger.Error("Missing value for --top option.");
+                    return false;
+                }
+
+                return TryParseTop(queue.Dequeue(), out topCount);
+            }
+
+            private static bool TryParseTop(string value, out int topCount)
+            {
+                if (!int.TryParse(value, out topCount) || topCount <= 0)
+                {
+                    ConsoleLogger.Error("Invalid value for --top option. Provide a positive integer.");
+                    topCount = 0;
+                    return false;
+                }
+
+                return true;
+            }
+
+            private static bool TryConsumeFormatValue(Queue<string> queue, out Rank.SuspiciousnessReportFormat format)
+            {
+                format = Rank.SuspiciousnessReportFormat.Csv;
+
+                if (queue.Count == 0)
+                {
+                    ConsoleLogger.Error("Missing value for --report-format option.");
+                    return false;
+                }
+
+                return TryParseFormat(queue.Dequeue(), out format);
+            }
+
+            private static bool TryParseFormat(string value, out Rank.SuspiciousnessReportFormat format)
+            {
+                format = Rank.SuspiciousnessReportFormat.Csv;
+
+                if (string.Equals(value, "csv", StringComparison.OrdinalIgnoreCase))
+                {
+                    format = Rank.SuspiciousnessReportFormat.Csv;
+                    return true;
+                }
+
+                if (string.Equals(value, "markdown", StringComparison.OrdinalIgnoreCase) || string.Equals(value, "md", StringComparison.OrdinalIgnoreCase))
+                {
+                    format = Rank.SuspiciousnessReportFormat.Markdown;
+                    return true;
+                }
+
+                ConsoleLogger.Error("Invalid value for --report-format option. Supported values are 'csv' and 'markdown'.");
+                return false;
+            }
+
+            private static bool TryConsumePathValue(Queue<string> queue, out string path)
+            {
+                path = string.Empty;
+
+                if (queue.Count == 0)
+                {
+                    ConsoleLogger.Error("Missing value for --report-path option.");
+                    return false;
+                }
+
+                path = queue.Dequeue();
+                if (string.IsNullOrWhiteSpace(path))
+                {
+                    ConsoleLogger.Error("Invalid value for --report-path option.");
+                    return false;
+                }
+
+                return true;
             }
         }
     }

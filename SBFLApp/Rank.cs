@@ -1,10 +1,21 @@
 using System.Collections;
+using System.Collections.ObjectModel;
 using System.Globalization;
 
 namespace SBFLApp
 {
     public class Rank
     {
+        public enum SuspiciousnessReportFormat
+        {
+            Csv,
+            Markdown,
+        }
+
+        public sealed record SuspiciousnessReportRow(string StatementId, string DisplayName, IReadOnlyDictionary<string, float> Scores, float BestScore);
+
+        public sealed record SuspiciousnessReportSnapshot(IReadOnlyList<string> Metrics, IReadOnlyList<SuspiciousnessReportRow> Rows);
+
         public Dictionary<string, float> tarantulaRank = [];
         public Dictionary<string, float> ochiaiRank = [];
         public Dictionary<string, float> dStarRank = [];
@@ -220,17 +231,72 @@ namespace SBFLApp
             }
         }
 
-        public void WriteSuspiciousnessReport(string filePath)
+        public SuspiciousnessReportSnapshot CreateReportSnapshot(int? topCount = null)
         {
-            var guidMappings = GuidMappingStore.GetMappings();
-            var orderedStatements = allStatements.Keys
-                .Select(stmt =>
-                {
-                    var displayName = guidMappings.TryGetValue(stmt, out var methodName) ? methodName : stmt;
-                    return new { Statement = stmt, Display = displayName };
-                })
-                .OrderBy(entry => entry.Display, StringComparer.Ordinal);
+            var calculatedColumns = GetCalculatedColumns();
+            var rows = BuildRows(calculatedColumns);
+            var filteredRows = ApplyTopFilter(rows, topCount);
 
+            return new SuspiciousnessReportSnapshot(
+                calculatedColumns.Select(column => column.Name).ToArray(),
+                filteredRows);
+        }
+
+        public void WriteSuspiciousnessReport(string filePath, SuspiciousnessReportSnapshot snapshot, SuspiciousnessReportFormat format)
+        {
+            var directory = Path.GetDirectoryName(filePath);
+            if (!string.IsNullOrEmpty(directory))
+            {
+                Directory.CreateDirectory(directory);
+            }
+
+            using var writer = new StreamWriter(filePath, false);
+
+            switch (format)
+            {
+                case SuspiciousnessReportFormat.Markdown:
+                    WriteMarkdownReport(writer, snapshot);
+                    break;
+                default:
+                    WriteCsvReport(writer, snapshot);
+                    break;
+            }
+        }
+
+        private static void WriteCsvReport(StreamWriter writer, SuspiciousnessReportSnapshot snapshot)
+        {
+            var headerColumns = new List<string> { "Statement" };
+            headerColumns.AddRange(snapshot.Metrics);
+            writer.WriteLine(string.Join(",", headerColumns));
+
+            foreach (var row in snapshot.Rows)
+            {
+                var values = new List<string> { Escape($"{row.DisplayName}.{row.StatementId}") };
+                values.AddRange(snapshot.Metrics.Select(metric => FormatRank(row.Scores.TryGetValue(metric, out float score) ? score : null)));
+
+                writer.WriteLine(string.Join(",", values));
+            }
+        }
+
+        private static void WriteMarkdownReport(StreamWriter writer, SuspiciousnessReportSnapshot snapshot)
+        {
+            var header = new List<string> { "Statement" };
+            header.AddRange(snapshot.Metrics);
+
+            writer.WriteLine($"| {string.Join(" | ", header)} |");
+            writer.WriteLine($"| {string.Join(" | ", header.Select(_ => "---"))} |");
+
+            foreach (var row in snapshot.Rows)
+            {
+                var values = new List<string> { EscapeMarkdown($"{row.DisplayName}.{row.StatementId}") };
+                values.AddRange(snapshot.Metrics.Select(metric => EscapeMarkdown(FormatRank(row.Scores.TryGetValue(metric, out float score) ? score : null))));
+
+                writer.WriteLine($"| {string.Join(" | ", values)} |");
+            }
+        }
+
+        private List<(string Name, Dictionary<string, float> Ranks)> GetCalculatedColumns()
+        {
             var rankColumns = new List<(string Name, Dictionary<string, float> Ranks)>
             {
                 ("Tarantula", tarantulaRank),
@@ -240,37 +306,78 @@ namespace SBFLApp
                 ("Jaccard", jaccardRank)
             };
 
-            var calculatedColumns = rankColumns
+            return rankColumns
                 .Where(column => column.Ranks != null && column.Ranks.Count > 0)
                 .ToList();
+        }
 
-            using var writer = new StreamWriter(filePath, false);
-            var headerColumns = new List<string> { "Statement" };
-            headerColumns.AddRange(calculatedColumns.Select(column => column.Name));
-            writer.WriteLine(string.Join(",", headerColumns));
+        private List<SuspiciousnessReportRow> BuildRows(List<(string Name, Dictionary<string, float> Ranks)> calculatedColumns)
+        {
+            var guidMappings = GuidMappingStore.GetMappings();
+            var orderedStatements = allStatements.Keys
+                .Select(stmt =>
+                {
+                    var displayName = guidMappings.TryGetValue(stmt, out var methodName) ? methodName : stmt;
+                    return new { Statement = stmt, Display = displayName };
+                })
+                .OrderBy(entry => entry.Display, StringComparer.Ordinal)
+                .ThenBy(entry => entry.Statement, StringComparer.Ordinal)
+                .ToList();
+
+            var rows = new List<SuspiciousnessReportRow>(orderedStatements.Count);
 
             foreach (var entry in orderedStatements)
             {
-                var values = new List<string> { Escape($"{entry.Display}.{entry.Statement}") };
-                values.AddRange(calculatedColumns.Select(column => FormatRank(column.Ranks, entry.Statement)));
+                Dictionary<string, float> scores = [];
 
-                writer.WriteLine(string.Join(",", values));
-            }
-        }
-
-        private static string FormatRank(Dictionary<string, float> ranks, string stmt)
-        {
-            if (ranks.TryGetValue(stmt, out float value))
-            {
-                if (float.IsPositiveInfinity(value))
+                foreach (var column in calculatedColumns)
                 {
-                    return "Infinity";
+                    if (column.Ranks.TryGetValue(entry.Statement, out float value))
+                    {
+                        scores[column.Name] = value;
+                    }
                 }
 
-                return value.ToString("F6", CultureInfo.InvariantCulture);
+                float bestScore = scores.Count == 0
+                    ? float.NegativeInfinity
+                    : scores.Values.Any(float.IsPositiveInfinity)
+                        ? float.PositiveInfinity
+                        : scores.Values.Max();
+
+                rows.Add(new SuspiciousnessReportRow(entry.Statement, entry.Display, new ReadOnlyDictionary<string, float>(scores), bestScore));
             }
 
-            return string.Empty;
+            return rows;
+        }
+
+        private static List<SuspiciousnessReportRow> ApplyTopFilter(List<SuspiciousnessReportRow> rows, int? topCount)
+        {
+            if (!topCount.HasValue || topCount.Value <= 0)
+            {
+                return rows;
+            }
+
+            return rows
+                .OrderByDescending(row => float.IsPositiveInfinity(row.BestScore) ? float.PositiveInfinity : row.BestScore)
+                .ThenBy(row => row.DisplayName, StringComparer.Ordinal)
+                .ThenBy(row => row.StatementId, StringComparer.Ordinal)
+                .Take(topCount.Value)
+                .ToList();
+        }
+
+        private static string FormatRank(float? value)
+        {
+            if (!value.HasValue)
+            {
+                return string.Empty;
+            }
+
+            if (float.IsPositiveInfinity(value.Value))
+            {
+                return "Infinity";
+            }
+
+            return value.Value.ToString("F6", CultureInfo.InvariantCulture);
         }
 
         /// <summary>
@@ -286,6 +393,13 @@ namespace SBFLApp
             }
 
             return value;
+        }
+
+        private static string EscapeMarkdown(string value)
+        {
+            return value
+                .Replace("|", "\\|")
+                .Replace("\n", " ");
         }
 
     }
