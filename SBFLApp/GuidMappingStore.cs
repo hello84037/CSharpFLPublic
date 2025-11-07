@@ -5,6 +5,7 @@ namespace SBFLApp
         private static readonly object SyncRoot = new();
         private static readonly string MappingFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "guid_method_map.csv");
         private static Dictionary<string, GuidMappingEntry>? _mappings;
+        private static bool _isDirty;
 
         private sealed record GuidMappingEntry(string MethodName, string? SourceFile)
         {
@@ -39,7 +40,7 @@ namespace SBFLApp
                 }
 
                 _mappings[normalizedGuid] = new GuidMappingEntry(normalizedMethod, normalizedSource);
-                Persist();
+                _isDirty = true;
             }
         }
 
@@ -61,6 +62,7 @@ namespace SBFLApp
             lock (SyncRoot)
             {
                 _mappings = new Dictionary<string, GuidMappingEntry>(StringComparer.Ordinal);
+                _isDirty = false;
 
                 if (File.Exists(MappingFilePath))
                 {
@@ -136,22 +138,32 @@ namespace SBFLApp
             }
 
             _mappings = map;
+            _isDirty = false;
         }
 
-        private static void Persist()
+        public static void Flush()
         {
-            if (_mappings == null)
+            lock (SyncRoot)
             {
-                return;
-            }
+                if (_mappings == null || !_isDirty)
+                {
+                    return;
+                }
 
-            var lines = _mappings.Select(pair =>
+                PersistInternal();
+            }
+        }
+
+        private static void PersistInternal()
+        {
+            var lines = _mappings!.Select(pair =>
             {
                 var sourceFilePart = string.IsNullOrWhiteSpace(pair.Value.SourceFile) ? string.Empty : pair.Value.SourceFile;
                 return string.Join(',', pair.Key, pair.Value.MethodName, sourceFilePart);
             });
 
             File.WriteAllLines(MappingFilePath, lines);
+            _isDirty = false;
         }
     }
 }
