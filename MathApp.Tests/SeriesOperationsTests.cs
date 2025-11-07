@@ -1,8 +1,3 @@
-using System;
-using System.Collections.Generic;
-using MathApp;
-using Xunit;
-
 namespace MathApp.Tests
 {
     public class SeriesOperationsTests

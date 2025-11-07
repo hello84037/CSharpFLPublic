@@ -1,8 +1,3 @@
-using Microsoft.CodeAnalysis.CSharp.Syntax;
-using Microsoft.CodeAnalysis.CSharp;
-using Microsoft.CodeAnalysis;
-using System.Text.RegularExpressions;
-
 namespace MathApp
 {
     public class MathOperations
