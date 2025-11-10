@@ -29,7 +29,7 @@ dotnet build
 dotnet run --project SBFLApp/SBFLApp.csproj . MathApp.Tests MathApp
 ```
 
-Key behaviours:
+Key behaviors:
 - Test files are rewritten on disk during instrumentation. The tool removes previous instrumentation when rerun and updates the injected logging if necessary.
 - Coverage GUIDs are written to `<FullyQualifiedTestName>.coverage` files inside a `Coverage/` directory created next to the running application. Each test first logs to `__sbfl_current_test.coverage.tmp` and the file is promoted when the run finishes so stale data is never mixed with new results.
 - Once the run finishes, a `suspiciousness_report.csv` file is written to the provided solution directory. Use the optional flags below to tailor the output:
@@ -55,9 +55,4 @@ dotnet test
 ```
 
 The subtraction scenarios are expected to fail—they provide failing executions for the SBFL ranking.
-
-## Extending the sample
-- Introduce additional scenarios in `SeriesOperations` (or new helper classes) plus focused unit tests to explore how rankings shift when more complex bugs are introduced across multiple files.
-- Experiment with additional spectrum-based metrics by following the patterns in `Rank.cs`.
-- Integrate the ranking results with visualization tools or IDE extensions to aid debugging workflows.
 
