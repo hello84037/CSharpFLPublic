@@ -19,20 +19,16 @@ namespace SBFLApp
 
             // Process command line arguments.
             CommandLineArguments? arguments = CommandLineArguments.Parse(args);
-            if (arguments == null)
+            if (arguments == null || arguments.TestProjectFile == null || arguments.ProjectUnderTestFile == null)
             {
                 return;
             }
 
-            // Get the path to the test project.  If there isn't a .csproj file, then use the directory.
-            string? testProjectFile = Directory.EnumerateFiles(arguments.TestProjectDirectory, "*.csproj", SearchOption.TopDirectoryOnly).FirstOrDefault();
-            string testProjectPath = testProjectFile ?? arguments.TestProjectDirectory;
-
             // Get a list of the tests in the test project directory.
-            var discoveredTests = GetListOfTests(arguments.TestProjectDirectory);
+            var discoveredTests = GetListOfTests(arguments.TestProjectFile.DirectoryName ?? string.Empty);
 
             // Get a list of files to add coverage statements to.
-            var productionSourceFiles = DiscoverProductionSourceFiles(arguments.ProjectUnderTestDirectory);
+            var productionSourceFiles = DiscoverProductionSourceFiles(arguments.ProjectUnderTestFile.DirectoryName ?? string.Empty);
             if (productionSourceFiles.Count == 0)
             {
                 ConsoleLogger.Warning("No production source files discovered for instrumentation.");
@@ -42,7 +38,7 @@ namespace SBFLApp
             EnsureProductionInstrumentation(productionSourceFiles, TemporaryCoverageFileName, arguments.ResetRequested);
 
             // Run the tests and collect the pass/fail data.
-            var testPassFailData = RunTests(discoveredTests, testProjectPath, arguments.VerboseRequested);
+            var testPassFailData = RunTests(discoveredTests, arguments.TestProjectFile.FullName, arguments.VerboseRequested);
 
             var testCoverage = BuildTestCoverage(discoveredTests);
 
@@ -678,8 +674,8 @@ namespace SBFLApp
         private class CommandLineArguments
         {
             public string SolutionDirectory { get; set; }
-            public string TestProjectDirectory { get; set; }
-            public string ProjectUnderTestDirectory { get; set; }
+            public FileInfo? TestProjectFile { get; set; }
+            public FileInfo? ProjectUnderTestFile { get; set; }
             public bool ResetRequested { get; set; }
             public bool VerboseRequested { get; set; }
             public bool CleanupRequested {  get; set; }
@@ -691,8 +687,8 @@ namespace SBFLApp
             private CommandLineArguments()
             {
                 SolutionDirectory = string.Empty;
-                TestProjectDirectory = string.Empty;
-                ProjectUnderTestDirectory = string.Empty;
+                TestProjectFile = null;
+                ProjectUnderTestFile = null;
                 ResetRequested = false;
                 VerboseRequested = false;
                 CleanupRequested = false;
@@ -732,21 +728,25 @@ namespace SBFLApp
                     return null;
                 }
 
-                // Verify the test project path exists.  The assumption is that the project name matches the project directory.
-                arguments.TestProjectDirectory = Path.Combine(arguments.SolutionDirectory, testProjectName);
-                if (!Directory.Exists(arguments.TestProjectDirectory))
+                // Verify the test project path exists.
+                string? testProjectFile = Directory.EnumerateFiles(arguments.SolutionDirectory, $"{testProjectName}.csproj", SearchOption.AllDirectories).FirstOrDefault();
+                if (string.IsNullOrEmpty(testProjectFile))
                 {
-                    ConsoleLogger.Error($"Test project directory not found: {arguments.TestProjectDirectory}");
+                    ConsoleLogger.Error($"Test project file not found: {testProjectName}");
                     return null;
                 }
 
-                // Verify the project under test path exists.  The assumption is that the project name matches the project directory.
-                arguments.ProjectUnderTestDirectory = Path.Combine(arguments.SolutionDirectory, projectUnderTestName);
-                if (!Directory.Exists(arguments.ProjectUnderTestDirectory))
+                arguments.TestProjectFile = new FileInfo(testProjectFile);
+
+                // Verify the project under test path exists.
+                string? projectUnderTestFile = Directory.EnumerateFiles(arguments.SolutionDirectory, $"{projectUnderTestName}.csproj", SearchOption.AllDirectories).FirstOrDefault();
+                if (string.IsNullOrEmpty(projectUnderTestFile))
                 {
-                    ConsoleLogger.Error($"Project under test directory not found: {arguments.ProjectUnderTestDirectory}");
+                    ConsoleLogger.Error($"Project under test file not found: {projectUnderTestName}");
                     return null;
                 }
+
+                arguments.ProjectUnderTestFile = new FileInfo(projectUnderTestFile);
 
                 return arguments;
             }
