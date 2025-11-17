@@ -468,7 +468,14 @@ namespace SBFLApp
                     File.Delete(finalCoverageFileName);
                 }
 
-                File.Move(temporaryCoverageFileName, finalCoverageFileName);
+                if(File.Exists(temporaryCoverageFileName))
+                {
+                    File.Move(temporaryCoverageFileName, finalCoverageFileName);
+                }
+                else
+                {
+                    ConsoleLogger.Info($"No coverage data was generated, {finalCoverageFileName} was not created.");
+                }
             }
             catch (IOException ex)
             {
