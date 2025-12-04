@@ -35,6 +35,8 @@ namespace SBFLApp
                 return;
             }
 
+            ProjectReferenceManager.EnsureCoverageLoggerReference(arguments.ProjectUnderTestFile.FullName);
+
             EnsureProductionInstrumentation(productionSourceFiles, TemporaryCoverageFileName, arguments.ResetRequested);
 
             // Run the tests and collect the pass/fail data.
