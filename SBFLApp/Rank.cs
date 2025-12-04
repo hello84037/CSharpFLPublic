@@ -94,6 +94,10 @@ namespace SBFLApp
                 // Go through the failed tests and check to see if this statement is covered.
                 foreach (string test in failed)
                 {
+                    if(testCoverage.ContainsKey(test) == false)
+                    {
+                        continue;
+                    }
                     ISet<string> statementCoveredByTest = testCoverage[test];
                     if (statementCoveredByTest.Contains(stmt))
                     {
@@ -104,6 +108,10 @@ namespace SBFLApp
                 // Go through the passing tests and check to see if this statement is covered.
                 foreach (string test in passed)
                 {
+                    if (testCoverage.ContainsKey(test) == false)
+                    {
+                        continue;
+                    }
                     ISet<string> statementCoveredByTest = testCoverage[test];
                     if (statementCoveredByTest.Contains(stmt))
                     {
